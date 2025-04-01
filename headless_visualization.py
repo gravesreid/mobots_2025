@@ -111,7 +111,7 @@ class StreamHandler(BaseHTTPRequestHandler):
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Time Display Stream</title>
+            <title>Pi Display Stream</title>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 body {{
@@ -155,7 +155,7 @@ class StreamHandler(BaseHTTPRequestHandler):
         </head>
         <body>
             <div class="container">
-                <h1>Time Display Stream</h1>
+                <h1>Pi Display Stream</h1>
                 <img src="/stream" alt="Time Stream">
                 <br>
                 <a href="/snapshot" class="button">Take Snapshot</a>
