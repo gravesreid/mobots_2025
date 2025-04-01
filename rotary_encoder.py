@@ -76,6 +76,8 @@ class decoder:
       self.cbB = self.sbc.callback(
          self.chip, gpioB, sbc.BOTH_EDGES, self._pulse)
 
+      self.pulse_count = 0
+
    def _pulse(self, chip, gpio, level, tick):
 
       """
@@ -93,6 +95,8 @@ class decoder:
              |         |         |         |
          ----+         +---------+         +---------+  1
       """
+
+      self.pulse_count += 1
 
       if gpio == self.gpioA:
          self.levA = level

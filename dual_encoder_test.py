@@ -7,7 +7,7 @@ ENA1, IN1, IN2 = 13, 6, 5  # Motor 1
 ENA2, IN3, IN4 = 12, 24, 23  # Motor 2
 
 # Define GPIO pins for encoders
-ENC_A1, ENC_B1 = 17, 27  # Encoder for Motor 1
+ENC_A1, ENC_B1 = 17, 18  # Encoder for Motor 1
 ENC_A2, ENC_B2 = 25, 16  # Encoder for Motor 2
 
 # Position counters for encoders
@@ -46,6 +46,8 @@ def drive_motor(h, ena, in1, in2, duty_cycle, duration, direction):
         time.sleep(high_time)
         lgpio.gpio_write(h, ena, 0)  # Enable low
         time.sleep(low_time)
+    print(f'pos1: {pos1}')
+    print(f'pos2: {pos2}')
 
 # Main script
 try:
@@ -65,16 +67,16 @@ try:
 
     # Run motor tests while reading encoder values
     print("Driving Motor 1 forward...")
-    drive_motor(h, ENA1, IN1, IN2, duty_cycle=50, duration=5, direction="forward")
+    drive_motor(h, ENA1, IN1, IN2, duty_cycle=10, duration=5, direction="forward")
 
     print("Driving Motor 1 reverse...")
-    drive_motor(h, ENA1, IN1, IN2, duty_cycle=50, duration=5, direction="reverse")
+    drive_motor(h, ENA1, IN1, IN2, duty_cycle=10, duration=5, direction="reverse")
 
     print("Driving Motor 2 forward...")
-    drive_motor(h, ENA2, IN3, IN4, duty_cycle=50, duration=5, direction="forward")
+    drive_motor(h, ENA2, IN3, IN4, duty_cycle=1, duration=5, direction="forward")
 
     print("Driving Motor 2 reverse...")
-    drive_motor(h, ENA2, IN3, IN4, duty_cycle=50, duration=5, direction="reverse")
+    drive_motor(h, ENA2, IN3, IN4, duty_cycle=1, duration=5, direction="reverse")
 
 except KeyboardInterrupt:
     print("\nStopping motors...")
