@@ -302,6 +302,55 @@ def test_simple_path():
     # load path from csv "simple_path.csv", in the form x,y,t
     path = np.loadtxt("simple_path.csv", delimiter=",", skiprows=1)
     mobot.set_path(path)
+
+    save_dir = "data/images"
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Images will be saved to {save_dir}")
+    server = SimpleStreamServer(port=8080)
+    
+    cap = cv2.VideoCapture(4)
+    while mobot.path_idx < len(mobot.path) - 2:
+        try:
+            # Initialize frame counter for statistics
+            frame_count = 0
+            start_time = time.time()
+            last_stats_time = start_time
+            
+            # Main loop
+            while True:
+                # Read a frame from the camera
+                ret, frame = cap.read()
+                
+                if not ret:
+                    print("Error: Could not read frame")
+                    break
+                
+                # Update the frame in the web server
+                server.update_frame(frame)
+                
+                # Save the frame with timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
+                img_path = os.path.join("data/images", f"image_{timestamp}.jpg")
+                cv2.imwrite(img_path, frame)
+                
+                # Update statistics
+                frame_count += 1
+                current_time = time.time()
+                if current_time - last_stats_time >= 5.0:
+                    fps = frame_count / (current_time - last_stats_time)
+                    print(f"Streaming at {fps:.2f} FPS, saved {frame_count} images")
+                    frame_count = 0
+                    last_stats_time = current_time
+                
+        except KeyboardInterrupt:
+            print("Interrupted by user")
+        finally:
+            # Clean up
+            cap.release()
+            server.stop()
+            print("Resources released and server stopped")
+        
+
     input("press enter to stop")
     plt.figure()
     plt.plot(mobot.xs, mobot.ys)
