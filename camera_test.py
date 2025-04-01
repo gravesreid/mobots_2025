@@ -1,82 +1,73 @@
-#!/usr/bin/env python3
-
 import pyrealsense2 as rs
 import numpy as np
 import cv2
-import os
-from datetime import datetime
+import time
+import argparse
 
-def capture_realsense_frame():
-    # Create a pipeline
+# Import the SimpleStreamServer from our provided code
+from headless_visualization import SimpleStreamServer
+
+def main():
+    # Create and configure the RealSense pipeline
     pipeline = rs.pipeline()
-    
-    # Create a config and configure the pipeline to stream
     config = rs.config()
     
-    # Enable the streams (both depth and color)
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+    # Enable the RGB stream (color)
+    # Common resolutions: 640x480, 1280x720
     config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
     
-    # Start streaming
-    print("Starting RealSense camera...")
-    pipeline_profile = pipeline.start(config)
+    # Start the server for web streaming
+    server = SimpleStreamServer(port=8080)
+    print("RealSense Stream Server started")
     
     try:
-        # Wait for the camera to warm up
-        print("Waiting for camera to warm up...")
-        for i in range(30):
-            pipeline.wait_for_frames()
+        # Start the RealSense pipeline
+        pipeline.start(config)
+        print("RealSense camera started")
         
-        # Get timestamp for filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Initialize stats variables
+        frame_count = 0
+        start_time = time.time()
+        last_stats_time = start_time
         
-        # Create directory if it doesn't exist
-        save_dir = "realsense_captures"
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        
-        # Capture a single frameset
-        print("Capturing frames...")
-        frameset = pipeline.wait_for_frames()
-        
-        # Get depth and color frames
-        depth_frame = frameset.get_depth_frame()
-        color_frame = frameset.get_color_frame()
-        
-        if not depth_frame or not color_frame:
-            print("Error: Could not capture frames")
-            return False
-        
-        # Convert frames to numpy arrays
-        depth_image = np.asanyarray(depth_frame.get_data())
-        color_image = np.asanyarray(color_frame.get_data())
-        
-        # Apply colormap on depth image (convert to 8-bit per pixel first)
-        depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
-        
-        # Save the images
-        color_path = f"{save_dir}/color_{timestamp}.png"
-        depth_path = f"{save_dir}/depth_{timestamp}.png"
-        
-        cv2.imwrite(color_path, color_image)
-        cv2.imwrite(depth_path, depth_colormap)
-        
-        print(f"Color image saved to: {color_path}")
-        print(f"Depth image saved to: {depth_path}")
-        
-        return True
-    
+        # Main loop
+        while True:
+            # Wait for a coherent set of frames from the camera
+            frames = pipeline.wait_for_frames()
+            
+            # Get the color frame
+            color_frame = frames.get_color_frame()
+            if not color_frame:
+                continue
+            
+            # Convert the color frame to a numpy array
+            color_image = np.asanyarray(color_frame.get_data())
+            
+            # Update the frame in the web server
+            server.update_frame(color_image)
+            
+            # Update statistics
+            frame_count += 1
+            current_time = time.time()
+            if current_time - last_stats_time >= 5.0:  # Show stats every 5 seconds
+                fps = frame_count / (current_time - last_stats_time)
+                print(f"Streaming at {fps:.2f} FPS ({frame_count} frames in {current_time - last_stats_time:.1f}s)")
+                frame_count = 0
+                last_stats_time = current_time
+            
+    except KeyboardInterrupt:
+        print("Interrupted by user")
     finally:
-        # Stop streaming
+        # Clean up
         pipeline.stop()
-        print("Camera stopped")
+        server.stop()
+        print("Resources released and server stopped")
 
 if __name__ == "__main__":
-    try:
-        result = capture_realsense_frame()
-        if result:
-            print("Frame captured and saved successfully!")
-        else:
-            print("Failed to capture frame")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='RealSense camera streaming over HTTP')
+    parser.add_argument('--port', type=int, default=8080, help='Port to run the server on (default: 8080)')
+    
+    args = parser.parse_args()
+    
+    main()
