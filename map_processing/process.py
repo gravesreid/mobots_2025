@@ -99,6 +99,18 @@ def clean_map():
 
     plt.show()
 
+def plot_image():
+    path = "/home/aigeorge/projects/mobots_2025/map_processing/inverted_manual_crop.png"
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+
+    # create a mask
+    mask = img[:, :, 3] > 0
+
+    # plot the mask:
+    plt.imshow(mask, cmap="gray")
+    plt.show()
+
 if __name__ == "__main__":
     # clean_map()
-    initial_process()
+    # initial_process()
+    plot_image()
