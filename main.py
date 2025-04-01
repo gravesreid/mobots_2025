@@ -3,6 +3,10 @@ import time
 from multiprocessing import Process, Queue
 import numpy as np
 from typing import Tuple, Union, Dict, List
+import os
+from headless_visualization import SimpleStreamServer
+import cv2
+from datetime import datetime
 
 class MoBot():
     ENA1, IN1_A, IN1_B = 13, 6, 5  # Motor 1
@@ -300,55 +304,55 @@ def test_simple_path():
     chip = lgpio.gpiochip_open(4)
     mobot = MoBot(chip=chip, verbose=True)
     # load path from csv "simple_path.csv", in the form x,y,t
-    path = np.loadtxt("simple_path.csv", delimiter=",", skiprows=1)
+    path = np.loadtxt("/home/pi/mobots_2025/map_processing/test_points_processed.csv", delimiter=",", skiprows=1)
     mobot.set_path(path)
 
-    save_dir = "data/images"
-    os.makedirs(save_dir, exist_ok=True)
-    print(f"Images will be saved to {save_dir}")
-    server = SimpleStreamServer(port=8080)
+    # save_dir = "data/images"
+    # os.makedirs(save_dir, exist_ok=True)
+    # print(f"Images will be saved to {save_dir}")
+    # server = SimpleStreamServer(port=8080)
     
-    cap = cv2.VideoCapture(4)
-    while mobot.path_idx < len(mobot.path) - 2:
-        try:
-            # Initialize frame counter for statistics
-            frame_count = 0
-            start_time = time.time()
-            last_stats_time = start_time
+    # cap = cv2.VideoCapture(4)
+    # while mobot.path_idx < len(mobot.path) - 2:
+    #     try:
+    #         # Initialize frame counter for statistics
+    #         frame_count = 0
+    #         start_time = time.time()
+    #         last_stats_time = start_time
             
-            # Main loop
-            while True:
-                # Read a frame from the camera
-                ret, frame = cap.read()
+    #         # Main loop
+    #         while True:
+    #             # Read a frame from the camera
+    #             ret, frame = cap.read()
                 
-                if not ret:
-                    print("Error: Could not read frame")
-                    break
+    #             if not ret:
+    #                 print("Error: Could not read frame")
+    #                 break
                 
-                # Update the frame in the web server
-                server.update_frame(frame)
+    #             # Update the frame in the web server
+    #             server.update_frame(frame)
                 
-                # Save the frame with timestamp
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
-                img_path = os.path.join("data/images", f"image_{timestamp}.jpg")
-                cv2.imwrite(img_path, frame)
+    #             # Save the frame with timestamp
+    #             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
+    #             img_path = os.path.join("data/images", f"image_{timestamp}.jpg")
+    #             cv2.imwrite(img_path, frame)
                 
-                # Update statistics
-                frame_count += 1
-                current_time = time.time()
-                if current_time - last_stats_time >= 5.0:
-                    fps = frame_count / (current_time - last_stats_time)
-                    print(f"Streaming at {fps:.2f} FPS, saved {frame_count} images")
-                    frame_count = 0
-                    last_stats_time = current_time
+    #             # Update statistics
+    #             frame_count += 1
+    #             current_time = time.time()
+    #             if current_time - last_stats_time >= 5.0:
+    #                 fps = frame_count / (current_time - last_stats_time)
+    #                 print(f"Streaming at {fps:.2f} FPS, saved {frame_count} images")
+    #                 frame_count = 0
+    #                 last_stats_time = current_time
                 
-        except KeyboardInterrupt:
-            print("Interrupted by user")
-        finally:
-            # Clean up
-            cap.release()
-            server.stop()
-            print("Resources released and server stopped")
+    #     except KeyboardInterrupt:
+    #         print("Interrupted by user")
+    #     finally:
+    #         # Clean up
+    #         cap.release()
+    #         server.stop()
+    #         print("Resources released and server stopped")
         
 
     input("press enter to stop")
@@ -356,7 +360,7 @@ def test_simple_path():
     plt.plot(mobot.xs, mobot.ys)
     plt.plot(mobot.path[:, 0], mobot.path[:, 1])
     # save the plot
-    plt.savefig('test_plot.png')
+    plt.savefig('test_plot2.png')
     print('killed')
 
 
