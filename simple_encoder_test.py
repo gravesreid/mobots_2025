@@ -21,10 +21,10 @@ lgpio.gpio_claim_input(h, gpioA2)
 lgpio.gpio_claim_input(h, gpioB2)
 
 # Claim alerts on the GPIO pins
-lgpio.gpio_claim_alert(h, gpioA1, lgpio.RISING_EDGE)
-lgpio.gpio_claim_alert(h, gpioB1, lgpio.RISING_EDGE)
-lgpio.gpio_claim_alert(h, gpioA2, lgpio.RISING_EDGE)
-lgpio.gpio_claim_alert(h, gpioB2, lgpio.RISING_EDGE)
+lgpio.gpio_claim_alert(h, gpioA1, lgpio.BOTH_EDGES)
+lgpio.gpio_claim_alert(h, gpioB1, lgpio.BOTH_EDGES)
+lgpio.gpio_claim_alert(h, gpioA2, lgpio.BOTH_EDGES)
+lgpio.gpio_claim_alert(h, gpioB2, lgpio.BOTH_EDGES)
 
 # Encoder state and positions
 encoders = {
