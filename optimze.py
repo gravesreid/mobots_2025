@@ -198,7 +198,7 @@ if __name__ == "__main__":
 
     cam_mask = thresh_image(cam_image)
 
-    x0 = 9
+    x0 = 2
     y0 = -0.2
     theta0 = -10
 
