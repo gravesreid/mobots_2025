@@ -328,7 +328,7 @@ def test_simple_path():
     chip = lgpio.gpiochip_open(4)
     mobot = MoBot(chip=chip, verbose=False)
     # load path from csv "simple_path.csv", in the form x,y,t
-    path = np.loadtxt("map_processing/test_points_processed.csv", delimiter=",", skiprows=1)
+    path = np.loadtxt("map_processing/race_points.csv", delimiter=",", skiprows=1)
     mobot.set_path(path)
 
     save_dir = "data/run_images"

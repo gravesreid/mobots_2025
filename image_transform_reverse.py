@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from math import sin, cos, radians
 from typing import List, Tuple
 
-def real_coords_to_pixel_coords(x, y, pixel_size=0.03, origin_pixel=(2418.8, 175.3)) -> tuple[float, float]:
+def real_coords_to_pixel_coords(x, y, pixel_size=0.03, origin_pixel=(2215.0, 178.0)) -> tuple[float, float]:
     """
     Convert real-world coordinates to pixel coordinates on the map.
     

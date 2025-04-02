@@ -21,7 +21,7 @@ def calculate_cos_sim(pose, cam_image, map, out_scale, image_size, calibration_p
 class MobotLocator:
     MAP_PATH = "map_processing/final_path.png"
     PIXEL_SIZE = 0.03 # 3 cm
-    ORIGIN_PIXEL = (2418.8, 175.3)
+    ORIGIN_PIXEL = (2215.0, 178.0)
     CALIBRATION_PIXELS = [(1142, 629), (245, 239), (1025, 145), (1878, 276)]
     CALIBRATION_LOCS = [(1, 0), (2, 1), (3, 0), (2, -1)]
     CALIB_IMAGE_SIZE = (1920, 1080)
