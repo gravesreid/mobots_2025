@@ -110,7 +110,21 @@ def plot_image():
     plt.imshow(mask, cmap="gray")
     plt.show()
 
+def convert_alpha_to_black_with_white_strip():
+    src_path = "map_processing/inverted_manual_crop.png"
+    dst_path = "map_processing/final_path.png"
+
+    # Load the image
+    img = cv2.imread(src_path, cv2.IMREAD_UNCHANGED)
+
+    # Create a mask
+    mask = img[:, :, 3] > 0
+
+
+    cv2.imwrite(dst_path, mask * 255)
+
 if __name__ == "__main__":
     # clean_map()
     # initial_process()
-    plot_image()
+    # plot_image()
+    convert_alpha_to_black_with_white_strip()
