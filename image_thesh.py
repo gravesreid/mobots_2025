@@ -49,82 +49,81 @@ def keep_largest_contiguous_area(binary_mask):
     
     return largest_mask
 
-path = "/home/aigeorge/projects/mobots_2025/data/old_images/image_20250401_175437_432.jpg"
+def thresh_image(image):
 
-# load image and convert to lab color space
-image = cv2.imread(path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-# resize the image to make it smaller
-image_size = image.shape
-image = cv2.resize(image, (int(image_size[1] * 0.5), int(image_size[0] * 0.5)))
+    # apply a gaussian blur to the image
 
-image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image = cv2.medianBlur(image, 7)
 
-# apply a gaussian blur to the image
+    # use median blurring
+    very_blurred = cv2.medianBlur(image, 21)
 
-image = cv2.medianBlur(image, 7)
+    very_very_blurred = cv2.medianBlur(image, 251)
 
-# use median blurring
-very_blurred = cv2.medianBlur(image, 21)
+    # take the element-wise maximum of the blurred images
+    combo = cv2.min(very_blurred, very_very_blurred)
 
-very_very_blurred = cv2.medianBlur(image, 251)
+    very_blurred = combo
 
-kinda_blurred = cv2.blur(image, (21, 21))
+    diff = np.float32(image)/np.float32(very_blurred)
 
-# take the element-wise maximum of the blurred images
-combo = cv2.min(very_blurred, very_very_blurred)
+    diff = np.uint8(cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX))
 
-very_blurred = combo
-
-diff = np.float32(image)/np.float32(very_blurred)
-
-diff = np.uint8(cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX))
-
-# apply otsu thresholding
-_, mask = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU, )
+    # apply otsu thresholding
+    _, mask = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU, )
 
 
-# Assuming you already have a binary image called 'mask'
-# Create a kernel (structuring element)
-kernel_size = 3  # Adjust based on your needs
-kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    # Assuming you already have a binary image called 'mask'
+    # Create a kernel (structuring element)
+    kernel_size = 3  # Adjust based on your needs
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
 
-# first, close the mask
-mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    # first, close the mask
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-congiguous_mask = keep_largest_contiguous_area(mask)
+    congiguous_mask = keep_largest_contiguous_area(mask)
+
+    return congiguous_mask
+
+if __name__ == "__main__":
+    path = "/home/aigeorge/projects/mobots_2025/data/old_images/image_20250401_175437_432.jpg"
+
+    # load image and convert to lab color space
+    image = cv2.imread(path)
 
 
 
-# plot the results (original image, colorful image, mask)
+    # plot the results (original image, colorful image, mask)
 
-# create a 3x1 plot
-plt.figure(figsize=(12, 6))
-plt.subplot(5, 1, 1)
-plt.title("Original Image")
-plt.imshow(image, cmap="gray")
-plt.axis("off")
+    # create a 3x1 plot
+    plt.figure(figsize=(12, 6))
+    plt.subplot(5, 1, 1)
+    plt.title("Original Image")
+    plt.imshow(image, cmap="gray")
+    plt.axis("off")
 
-plt.subplot(5, 1, 2)
-plt.title("very blurred Image")
-plt.imshow(very_blurred, cmap="gray")
-plt.axis("off")
+    plt.subplot(5, 1, 2)
+    plt.title("very blurred Image")
+    plt.imshow(very_blurred, cmap="gray")
+    plt.axis("off")
 
-plt.subplot(5, 1, 3)
-plt.title("Difference")
-plt.imshow(diff, cmap="gray")
-plt.axis("off")
+    plt.subplot(5, 1, 3)
+    plt.title("Difference")
+    plt.imshow(diff, cmap="gray")
+    plt.axis("off")
 
-plt.subplot(5, 1, 4)
-plt.title("Mask")
-plt.imshow(mask, cmap="gray")
-plt.axis("off")
+    plt.subplot(5, 1, 4)
+    plt.title("Mask")
+    plt.imshow(mask, cmap="gray")
+    plt.axis("off")
 
-plt.subplot(5, 1, 5)
-plt.title("Opened Mask")
-plt.imshow(congiguous_mask, cmap="gray")
-plt.axis("off")
+    plt.subplot(5, 1, 5)
+    plt.title("Opened Mask")
+    plt.imshow(congiguous_mask, cmap="gray")
+    plt.axis("off")
 
-plt.tight_layout()
+    plt.tight_layout()
 
-plt.show()
+    plt.show()
