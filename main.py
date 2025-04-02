@@ -8,14 +8,19 @@ import cv2
 from datetime import datetime
 
 class MapRenderer():
-    def __init__(self, map_path:str):
+    def __init__(self, map_path:str, line_step:int = 10):
         self.base_map = cv2.imread(map_path)
+        self.path_idx = 0
+        self.line_step = line_step
 
     def plot_path(self, path:np.ndarray):
-        map_image = self.base_map.copy()
-        for i in range(len(path) - 1):
-            cv2.line(map_image, tuple(path[i]), tuple(path[i+1]), (0, 0, 255), 2)
+        # update the line from the last point to the current point
+        for i in range(self.path_idx, len(path) - 1, self.line_step):
+            cv2.line(self.base_map, tuple(path[i]), tuple(path[i+1]), (0, 0, 255), 2)
+
+        self.path_idx = i + 1
         
+        map_image = self.base_map.copy()
         # add the last point
         cv2.circle(map_image, tuple(path[-1]), 5, (255, 0, 0), -1)
 
@@ -375,8 +380,10 @@ def test_simple_path():
 
                 # create the server image:
                 sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
+                
                 mobot_path = np.array([mobot.x, mobot.y]).copy().T
-                map_render = map_renderer.plot_path(mobot_path)
+                mobot_path_pix = locator.pose_to_pixel(mobot_path)
+                map_render = map_renderer.plot_path(mobot_path_pix)
                 
                 server_image = np.zeros(480*2, 270*2, 3)
                 server_image[:480, :270] = resized_image

@@ -138,6 +138,29 @@ class MobotLocator:
 
         return pose - init_pose
     
+    def pose_to_pixel(self, pose: np.ndarray) -> Tuple[int, int]:
+        """
+        Convert the pose to pixel coordinates.
+        
+        Args:
+            pose: The x, y position of the camera in the map. If the pose is a 1D array, it is assumed to be a single pose. If it is a 2D array, it is assumed to be multiple poses.
+            
+        Returns:
+            The pixel coordinates of the pose
+        """
+        rank = len(pose.shape)
+        if rank == 1:
+            out = np.zeros(2)
+            out[0] = self.ORIGIN_PIXEL[0] - pose[0] / self.PIXEL_SIZE
+            out[1] = self.ORIGIN_PIXEL[1] + pose[1] / self.PIXEL_SIZE
+        else:
+            out = np.zeros((pose.shape[0], 2))
+            out[:, 0] = self.ORIGIN_PIXEL[0] - pose[:, 0] / self.PIXEL_SIZE
+            out[:, 1] = self.ORIGIN_PIXEL[1] + pose[:, 1] / self.PIXEL_SIZE
+
+        return out
+        
+    
     def render_sim_image(self, pose: np.ndarray, cam_image: np.ndarray) -> np.ndarray:
         """
         Render the simulated image from the camera view.
