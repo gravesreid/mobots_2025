@@ -248,7 +248,7 @@ if __name__ == "__main__":
     print(transform_matrix)
     
     # Apply the transform to an image
-    image_path = "/home/aigeorge/projects/mobots_2025/data/image_20250401_184515_960.jpg"  # Replace with your image path
+    image_path = "data/image_20250401_184515_960.jpg"  # Replace with your image path
     
     try:
         # Read original image

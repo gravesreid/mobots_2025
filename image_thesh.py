@@ -88,7 +88,7 @@ def thresh_image(image):
     return congiguous_mask
 
 if __name__ == "__main__":
-    path = "/home/aigeorge/projects/mobots_2025/data/old_images/image_20250401_175437_432.jpg"
+    path = "data/old_images/image_20250401_175437_432.jpg"
 
     # load image and convert to lab color space
     image = cv2.imread(path)

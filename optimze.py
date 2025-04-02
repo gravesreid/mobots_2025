@@ -15,11 +15,11 @@ def calculate_cos_sim(pose, cam_image, map, out_scale, image_size, calibration_p
     if denom == 0:
         return 0
     cos_sim = np.sum(warped_image*cam_image) / denom
-    print(f"cos_sim: {cos_sim}")
+    # print(f"cos_sim: {cos_sim}")
     return cos_sim
 
 class MobotLocator:
-    MAP_PATH = "/home/aigeorge/projects/mobots_2025/map_processing/final_path.png"
+    MAP_PATH = "map_processing/final_path.png"
     PIXEL_SIZE = 0.03 # 3 cm
     ORIGIN_PIXEL = (2418.8, 175.3)
     CALIBRATION_PIXELS = [(1142, 629), (245, 239), (1025, 145), (1878, 276)]
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     locator = MobotLocator(max_detlas=np.array([0.1, 0.1, 10]), step_size=np.array([0.01, 0.01, 1.]))
 
     # Load the camera image
-    cam_image = cv2.imread("/home/aigeorge/projects/mobots_2025/data/old_images/image_20250401_180328_386.jpg")
+    cam_image = cv2.imread("data/old_images/image_20250401_180328_386.jpg")
 
     # image 640 x 480. Make it 270 x 480
     cam_image = cv2.resize(cam_image, (480, 270))

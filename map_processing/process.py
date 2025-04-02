@@ -6,7 +6,7 @@ from skimage.filters import threshold_local
 
 def initial_process():
     # Load the image
-    image_path = "C:\Projects\mobots_2025\map_processing\Mobot Satalite - crop.png"
+    image_path = "map_processing\Mobot Satalite - crop.png"
     image = cv2.imread(image_path)
 
     # Convert to grayscale
@@ -60,7 +60,7 @@ def initial_process():
 from skimage.morphology import skeletonize, binary_dilation, disk, binary_closing, binary_opening
 def clean_map():
     # Load image in grayscale
-    image_path = "C:\Projects\mobots_2025\map_processing\inverted_manual_crop.png"
+    image_path = "map_processing\inverted_manual_crop.png"
     img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
 
     if img.shape[2] != 4:
@@ -100,7 +100,7 @@ def clean_map():
     plt.show()
 
 def plot_image():
-    path = "/home/aigeorge/projects/mobots_2025/map_processing/inverted_manual_crop.png"
+    path = "map_processing/inverted_manual_crop.png"
     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
 
     # create a mask

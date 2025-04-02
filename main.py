@@ -16,13 +16,14 @@ class MapRenderer():
     def plot_path(self, path:np.ndarray):
         # update the line from the last point to the current point
         for i in range(self.path_idx, len(path) - 1, self.line_step):
-            cv2.line(self.base_map, tuple(path[i]), tuple(path[i+1]), (0, 0, 255), 2)
+            print("path i", path[i])
+            cv2.line(self.base_map, tuple(path[i].astype(np.int64)), tuple(path[i+1].astype(np.int64)), (0, 0, 255), 4)
 
         self.path_idx = i + 1
         
         map_image = self.base_map.copy()
         # add the last point
-        cv2.circle(map_image, tuple(path[-1]), 5, (255, 0, 0), -1)
+        cv2.circle(map_image, tuple(path[-1].astype(np.int64)), 10, (255, 0, 0), -1)
 
         return map_image
 
@@ -272,7 +273,8 @@ class MoBot():
             else:  
                 break
 
-        print('path idx:', self.path_idx)
+        if self.verbose:
+            print('path idx:', self.path_idx)
 
         # get the path heading:
         tangent = self.path[self.path_idx + 1] - self.path[self.path_idx - 1]
@@ -283,7 +285,8 @@ class MoBot():
         # and the tangent vector of the path (unit vector)
 
         dist = np.cross(pos - self.path[self.path_idx], tangent / np.linalg.norm(tangent))
-        print('dist:', dist)
+        if self.verbose:
+            print('dist:', dist)
 
         # find the point on the path that is LOOK_AHEAD away
         look_dist = 0
@@ -323,9 +326,9 @@ from optimze import MobotLocator
 from image_thesh import thresh_image
 def test_simple_path():
     chip = lgpio.gpiochip_open(4)
-    mobot = MoBot(chip=chip, verbose=True)
+    mobot = MoBot(chip=chip, verbose=False)
     # load path from csv "simple_path.csv", in the form x,y,t
-    path = np.loadtxt("/home/pi/mobots_2025/map_processing/test_points_processed.csv", delimiter=",", skiprows=1)
+    path = np.loadtxt("map_processing/test_points_processed.csv", delimiter=",", skiprows=1)
     mobot.set_path(path)
 
     save_dir = "data/run_images"
@@ -341,7 +344,13 @@ def test_simple_path():
     
     cap = cv2.VideoCapture(4)
 
-    locator = MobotLocator(max_detlas=np.array([0.1, 0.1, 10]), step_size=np.array([0.01, 0.01, 1]))
+    for _ in range(30):
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Could not read frame")
+            break
+
+    locator = MobotLocator(max_detlas=np.array([0.1, 0.1, 10]), step_size=np.array([0.01, 0.01, 1]), debug_print=False)
     map_renderer = MapRenderer("/home/pi/mobots_2025/map_processing/final_path.png")
     while mobot.path_idx < len(mobot.path) - 2:
         try:
@@ -359,36 +368,41 @@ def test_simple_path():
                     print("Error: Could not read frame")
                     break
 
-                image_pose = np.array([mobot.x, mobot.y, mobot.theta])
+                image_pose = np.array([mobot.x, mobot.y, mobot.theta*180/np.pi])
+                mobot_path = np.array([mobot.xs, mobot.ys]).copy().T
 
                 resized_image = cv2.resize(frame, (480, 270))
                 cam_mask = thresh_image(resized_image)  #threshold the image
 
-                #threshold the image
+                if np.sum(cam_mask) > 0.2*cam_mask.shape[0]*cam_mask.shape[1]:
+                    print('mask is too large. Line is probably not detected')
+                    time.sleep(0.)
+                    delta_pose = np.array([0, 0, 0])
+                else:
+                    # run the locator
+                    delta_pose = locator.locate_image(cam_image=cam_mask, 
+                                                    x=image_pose[0], 
+                                                    y=image_pose[1], 
+                                                    theta=image_pose[2])
 
-
-                # run the locator
-                delta_pose = locator.locate_image(cam_image=cam_mask, 
-                                                  x=image_pose[0], 
-                                                  y=image_pose[1], 
-                                                  theta=image_pose[2])
+                    print(f"delta_pose: {delta_pose}")
+                    print(f"image_pose: {image_pose}")
                 
                 # update the mobot pose
                 mobot.x += delta_pose[0]
                 mobot.y += delta_pose[1]
-                mobot.theta += delta_pose[2]
+                mobot.theta += delta_pose[2]*np.pi/180
 
                 # create the server image:
                 sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
                 
-                mobot_path = np.array([mobot.x, mobot.y]).copy().T
                 mobot_path_pix = locator.pose_to_pixel(mobot_path)
                 map_render = map_renderer.plot_path(mobot_path_pix)
                 
-                server_image = np.zeros(480*2, 270*2, 3)
-                server_image[:480, :270] = resized_image
-                server_image[:480, 270:] = sim_image   
-                server_image[480:, :] = cv2.resize(map_render, (480*2, 270))             
+                server_image = np.zeros([270*2, 480*2, 3])
+                server_image[:270, :480] = resized_image
+                server_image[:270, 480:] = sim_image   
+                server_image[270:, :] = cv2.resize(map_render, (480*2, 270))             
                 
                 # Update the frame in the web server
                 server.update_frame(server_image)
