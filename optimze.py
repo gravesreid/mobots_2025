@@ -11,14 +11,10 @@ def calculate_cos_sim(pose, cam_image, map, out_scale, image_size, calibration_p
     y = pose[1]
     theta = pose[2]
     warped_image = get_warped_image(x, y, theta, map, out_scale=out_scale, image_size=image_size, calibration_pix=calibration_pix, calibration_loc=calibration_loc)
-    # plot the warped image in red and the cam_image in blue overlayed
-    combo_image = np.zeros((cam_image.shape[0], cam_image.shape[1], 3), dtype=np.uint8)
-    combo_image[:, :, 0] = cam_image*255
-    combo_image[:, :, 2] = warped_image
-    # plt.figure()
-    # plt.imshow(combo_image)
-    # plt.show()
-    cos_sim = np.sum(warped_image*cam_image) / np.linalg.norm(warped_image) / np.linalg.norm(cam_image)
+    denom = np.linalg.norm(warped_image) * np.sqrt(sum_cam)
+    if denom == 0:
+        return 0
+    cos_sim = np.sum(warped_image*cam_image) / denom
     print(f"cos_sim: {cos_sim}")
     return cos_sim
 
@@ -30,11 +26,13 @@ class MobotLocator:
     CALIBRATION_LOCS = [(1, 0), (2, 1), (3, 0), (2, -1)]
     CALIB_IMAGE_SIZE = (1920, 1080)
 
-    def __init__(self, max_detlas: np.ndarray, step_size: np.ndarray):
+    def __init__(self, max_detlas: np.ndarray, step_size: np.ndarray, dist_penalty: float = 0.2, debug_print: bool = False):
         self.map = cv2.imread(self.MAP_PATH)
         self.map = cv2.cvtColor(self.map, cv2.COLOR_BGR2GRAY)
         self.max_detlas = max_detlas
         self.step_size = step_size
+        self.dist_penalty = dist_penalty
+        self.debug_print = debug_print
 
     def locate_image(self, cam_image: np.ndarray, x: float, y: float, theta: float) -> Tuple[float, float]:
         """
@@ -78,28 +76,39 @@ class MobotLocator:
                     pose[i] = np.random.uniform(-max_delta[i], max_delta[i]) + init_pose[i]
                 last_cos_sim = calculate_cos_sim(pose, cam_image, self.map, out_scale, self.CALIB_IMAGE_SIZE, self.CALIBRATION_PIXELS, self.CALIBRATION_LOCS, sum_cam)
             else:
-                print('initial pose found')
+                if self.debug_print:
+                    print('initial pose found')
                 break
         else:
-            print("No pose found")
-            return x, y, theta
+            if self.debug_print:
+                print("No pose found")
+            return 0, 0, 0
         
         t_max = 25
         for t in range(t_max):
-            delta = dir * step
             test_poses = []
+            dist_penalties = np.zeros(3)
             for i in range(3):
                 test_poses.append(pose.copy())
-                test_poses[i][i] += delta[i]
+                test_poses[i][i] += dir[i] * step[i]
                 test_poses[i] = np.clip(test_poses[i], init_pose - max_delta, init_pose + max_delta)
+                percent_dist = np.linalg.norm((test_poses[i] - init_pose)/max_delta)/np.sqrt(3)
+                # print('percent_dist: ', percent_dist)
+                dist_penalties[i] = 1 - self.dist_penalty * percent_dist # range from 1 to 1- dist_penalty
+
             new_sims[0] = calculate_cos_sim(test_poses[0], cam_image, self.map, out_scale, self.CALIB_IMAGE_SIZE, self.CALIBRATION_PIXELS, self.CALIBRATION_LOCS, sum_cam)
             new_sims[1] = calculate_cos_sim(test_poses[1], cam_image, self.map, out_scale, self.CALIB_IMAGE_SIZE, self.CALIBRATION_PIXELS, self.CALIBRATION_LOCS, sum_cam)
             new_sims[2] = calculate_cos_sim(test_poses[2], cam_image, self.map, out_scale, self.CALIB_IMAGE_SIZE, self.CALIBRATION_PIXELS, self.CALIBRATION_LOCS, sum_cam)
 
+            # apply dist penalties
+            new_sims = new_sims*dist_penalties
+
             improve = new_sims > last_cos_sim
-            print('last_cos_sim: ', last_cos_sim)
-            print("new_sims: ", new_sims)
-            print("improve: ", improve)
+            if self.debug_print:
+                print('dist_penalties: ', dist_penalties)
+                print('last_cos_sim: ', last_cos_sim)
+                print("new_sims: ", new_sims)
+                print("improve: ", improve)
 
             if np.sum(improve) + np.sum(last_improve) == 0:
                 break
@@ -129,6 +138,28 @@ class MobotLocator:
 
         return pose - init_pose
     
+    def render_sim_image(self, pose: np.ndarray, cam_image: np.ndarray) -> np.ndarray:
+        """
+        Render the simulated image from the camera view.
+        
+        Args:
+            pose: The x, y, theta position of the camera in the map
+            cam_image: The image from the camera
+            
+        Returns:
+            The simulated image from the camera view
+        """
+        x, y, theta = pose
+
+        out_scale =  cam_image.shape[0]/self.CALIB_IMAGE_SIZE[1]
+        warped_image = get_warped_image(x, y, theta, self.map, out_scale, image_size=self.CALIB_IMAGE_SIZE, calibration_pix=self.CALIBRATION_PIXELS, calibration_loc=self.CALIBRATION_LOCS)
+        
+        # plot the warped image in red and the cam_image in blue overlayed
+        combo_image = np.zeros((cam_image.shape[0], cam_image.shape[1], 3), dtype=np.uint8)
+        combo_image[:, :, 0] = cam_image
+        combo_image[:, :, 2] = warped_image
+
+        return combo_image
 
 from image_thesh import thresh_image
 if __name__ == "__main__":
@@ -144,6 +175,17 @@ if __name__ == "__main__":
 
     cam_mask = thresh_image(cam_image)
 
+    x0 = 9
+    y0 = -0.2
+    theta0 = -10
 
     # Locate the image in the map
-    dx, dy, dtheta = locator.locate_image(cam_mask, 10, 0, 0)
+    dx, dy, dtheta = locator.locate_image(cam_mask, x0, y0, theta0)
+
+    print(f"dx: {dx}, dy: {dy}, dtheta: {dtheta}")
+
+    render_image = locator.render_sim_image(np.array([x0 + dx, y0 + dy, theta0 + dtheta]), cam_mask)
+
+    plt.figure()
+    plt.imshow(render_image)
+    plt.show()

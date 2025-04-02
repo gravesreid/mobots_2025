@@ -1,12 +1,27 @@
 import lgpio
 import time
-from multiprocessing import Process, Queue
 import numpy as np
 from typing import Tuple, Union, Dict, List
 import os
 from headless_visualization import SimpleStreamServer
 import cv2
 from datetime import datetime
+
+class MapRenderer():
+    def __init__(self, map_path:str):
+        self.base_map = cv2.imread(map_path)
+
+    def plot_path(self, path:np.ndarray):
+        map_image = self.base_map.copy()
+        for i in range(len(path) - 1):
+            cv2.line(map_image, tuple(path[i]), tuple(path[i+1]), (0, 0, 255), 2)
+        
+        # add the last point
+        cv2.circle(map_image, tuple(path[-1]), 5, (255, 0, 0), -1)
+
+        return map_image
+
+
 
 class MoBot():
     ENA1, IN1_A, IN1_B = 13, 6, 5  # Motor 1
@@ -299,7 +314,8 @@ class MoBot():
         
 
 import matplotlib.pyplot as plt
-
+from optimze import MobotLocator
+from image_thesh import thresh_image
 def test_simple_path():
     chip = lgpio.gpiochip_open(4)
     mobot = MoBot(chip=chip, verbose=True)
@@ -307,52 +323,94 @@ def test_simple_path():
     path = np.loadtxt("/home/pi/mobots_2025/map_processing/test_points_processed.csv", delimiter=",", skiprows=1)
     mobot.set_path(path)
 
-    # save_dir = "data/images"
-    # os.makedirs(save_dir, exist_ok=True)
-    # print(f"Images will be saved to {save_dir}")
-    # server = SimpleStreamServer(port=8080)
+    save_dir = "data/run_images"
+    n = 0
+    # find a non-existing directory
+    while os.path.exists(os.path.join(save_dir, f"run_{n}")):
+        n += 1
+
+    save_dir = os.path.join(save_dir, f"run_{n}")
+    os.makedirs(save_dir)
+    print(f"Images will be saved to {save_dir}")
+    server = SimpleStreamServer(port=8080)
     
-    # cap = cv2.VideoCapture(4)
-    # while mobot.path_idx < len(mobot.path) - 2:
-    #     try:
-    #         # Initialize frame counter for statistics
-    #         frame_count = 0
-    #         start_time = time.time()
-    #         last_stats_time = start_time
+    cap = cv2.VideoCapture(4)
+
+    locator = MobotLocator(max_detlas=np.array([0.1, 0.1, 10]), step_size=np.array([0.01, 0.01, 1]))
+    map_renderer = MapRenderer("/home/pi/mobots_2025/map_processing/final_path.png")
+    while mobot.path_idx < len(mobot.path) - 2:
+        try:
+            # Initialize frame counter for statistics
+            frame_count = 0
+            start_time = time.time()
+            last_stats_time = start_time
             
-    #         # Main loop
-    #         while True:
-    #             # Read a frame from the camera
-    #             ret, frame = cap.read()
+            # Main loop
+            while True:
+                # Read a frame from the camera
+                ret, frame = cap.read()
                 
-    #             if not ret:
-    #                 print("Error: Could not read frame")
-    #                 break
+                if not ret:
+                    print("Error: Could not read frame")
+                    break
+
+                image_pose = np.array([mobot.x, mobot.y, mobot.theta])
+
+                resized_image = cv2.resize(frame, (480, 270))
+                cam_mask = thresh_image(resized_image)  #threshold the image
+
+                #threshold the image
+
+
+                # run the locator
+                delta_pose = locator.locate_image(cam_image=cam_mask, 
+                                                  x=image_pose[0], 
+                                                  y=image_pose[1], 
+                                                  theta=image_pose[2])
                 
-    #             # Update the frame in the web server
-    #             server.update_frame(frame)
+                # update the mobot pose
+                mobot.x += delta_pose[0]
+                mobot.y += delta_pose[1]
+                mobot.theta += delta_pose[2]
+
+                # create the server image:
+                sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
+                mobot_path = np.array([mobot.x, mobot.y]).copy().T
+                map_render = map_renderer.plot_path(mobot_path)
                 
-    #             # Save the frame with timestamp
-    #             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
-    #             img_path = os.path.join("data/images", f"image_{timestamp}.jpg")
-    #             cv2.imwrite(img_path, frame)
+                server_image = np.zeros(480*2, 270*2, 3)
+                server_image[:480, :270] = resized_image
+                server_image[:480, 270:] = sim_image   
+                server_image[480:, :] = cv2.resize(map_render, (480*2, 270))             
                 
-    #             # Update statistics
-    #             frame_count += 1
-    #             current_time = time.time()
-    #             if current_time - last_stats_time >= 5.0:
-    #                 fps = frame_count / (current_time - last_stats_time)
-    #                 print(f"Streaming at {fps:.2f} FPS, saved {frame_count} images")
-    #                 frame_count = 0
-    #                 last_stats_time = current_time
+                # Update the frame in the web server
+                server.update_frame(server_image)
                 
-    #     except KeyboardInterrupt:
-    #         print("Interrupted by user")
-    #     finally:
-    #         # Clean up
-    #         cap.release()
-    #         server.stop()
-    #         print("Resources released and server stopped")
+                # Save the frame with timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
+                img_path = os.path.join(save_dir, f"image_{timestamp}.jpg")
+                cv2.imwrite(img_path, frame)
+
+                # save the server image
+                img_path = os.path.join(save_dir, f"server_image_{timestamp}.jpg")
+                cv2.imwrite(img_path, server_image)
+                
+                # Update statistics
+                frame_count += 1
+                current_time = time.time()
+                if current_time - last_stats_time >= 5.0:
+                    fps = frame_count / (current_time - last_stats_time)
+                    print(f"Camera Loop at {fps:.2f} FPS, saved {frame_count} images")
+                    frame_count = 0
+                    last_stats_time = current_time
+                
+        except KeyboardInterrupt:
+            print("Interrupted by user")
+        finally:
+            # Clean up
+            cap.release()
+            server.stop()
+            print("Resources released and server stopped")
         
 
     input("press enter to stop")
