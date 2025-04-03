@@ -7,9 +7,8 @@ from math import sin, cos, radians
 import sys
 from io import StringIO
 from contextlib import redirect_stdout
-sys.path.append('..')  # Add parent directory to path
-from image_transform_reverse import real_coords_to_pixel_coords
-from image_transform_reverse2 import get_warped_image
+from image_transform_reverse_2 import real_coords_to_pixel_coords
+from image_transform_reverse_2 import get_warped_image
 
 
 class Control:
