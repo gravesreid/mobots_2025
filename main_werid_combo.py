@@ -406,17 +406,239 @@ class MoBot():
         pwm_2 = pwm_speed - pwm_angle
 
         self.set_motor_pwms((pwm_1, pwm_2))
+
+
+# Given calibration data
+CALIBRATION_PIXELS = [(1142, 629), (245, 239), (1025, 145), (1878, 276)]
+CALIBRATION_LOCS = [(0.34, 0), (0.68, 0.34), (1.02, 0), (0.68, -0.34)]
+CALIB_IMAGE_SIZE = (1920, 1080)
+
+
+"""
+Computes the affine transform matrix from pixel coordinates to world coordinates
+using the calibration points.
+
+Returns:
+    M: 2x3 affine transformation matrix
+"""
+# Convert the calibration points to numpy arrays
+pixels = np.array(CALIBRATION_PIXELS, dtype=np.float32)
+world = np.array(CALIBRATION_LOCS, dtype=np.float32)
+
+# Compute the affine transformation matrix
+# This solves for the matrix that best maps pixels to world coordinates
+TRANSFORM = cv2.estimateAffine2D(pixels, world)[0]
+
+
+def pixel_to_world(pixel_coords, transform_matrix):
+    """
+    Converts pixel coordinates to world coordinates using the affine transform.
+    
+    Args:
+        pixel_coords: Tuple or list (x, y) of pixel coordinates
+        transform_matrix: 2x3 affine transformation matrix
+    
+    Returns:
+        Tuple (x, y) of world coordinates
+    """
+    # Convert to homogeneous coordinates (add a 1)
+    pixel = np.array([[pixel_coords[0]], [pixel_coords[1]], [1]], dtype=np.float32)
+    
+    # Apply the transform
+    world = transform_matrix @ pixel
+    
+    return (float(world[0]), float(world[1]))
+
+class CenterLineDetector():
+
+    def draw_outline_curves(self, mask, original_image=None):
+        """
+        Draw two vertical curves that outline the white object in the mask.
         
+        Args:
+            mask: Binary mask with the white object
+            original_image: Optional original image to draw on (if None, will draw on a copy of the mask)
+        
+        Returns:
+            Tuple of (image with curves, left_curve, right_curve)
+        """
+        # Use a copy of the original image
+        result_img = original_image.copy()
+        
+        # Get the height and width of the mask
+        height, width = mask.shape[:2]
+        
+        # Initialize lists to store the left and right curve points
+        left_curve = []
+        right_curve = []
+        
+        # For each row in the mask
+        for y in range(height):
+            row = mask[y, :]
+            white_pixels = np.where(row > 0)[0]
+            
+            # If there are white pixels in this row
+            if len(white_pixels) > 0:
+                # Get the leftmost and rightmost white pixels
+                left_x = white_pixels[0]
+                right_x = white_pixels[-1]
+                
+                # Add to the curves
+                left_curve.append((left_x, y))
+                right_curve.append((right_x, y))
+        
+        # Convert lists to numpy arrays for drawing
+        if left_curve and right_curve:
+            left_curve = np.array(left_curve, dtype=np.int32)
+            right_curve = np.array(right_curve, dtype=np.int32)
+            
+            # Draw the curves
+            cv2.polylines(result_img, [left_curve], False, (0, 0, 255), 2)  # Red for left curve
+            cv2.polylines(result_img, [right_curve], False, (255, 0, 0), 2)  # Blue for right curve
+        
+        # Return both the image and the curves for further processing
+        return result_img, left_curve, right_curve
+    
+    def get_center_line_angle(self, top_point, bottom_point):
+        """
+        Calculate the angle of the center line.
+        
+        Args:
+            top_point: (x, y) coordinates of the top of the line
+            bottom_point: (x, y) coordinates of the bottom of the line
+            
+        Returns:
+            Angle in degrees
+        """
+        dx = top_point[0] - bottom_point[0]
+        dy = top_point[1] - bottom_point[1]
+        
+        # Calculate angle in degrees (0 is vertical, positive is right, negative is left)
+        angle = np.arctan2(dx, dy) * 180 / np.pi
+        
+        return angle
+    
+    def create_center_line(self, left_curve, right_curve, img, start_at_bottom_third=True):
+        """
+        Create a straight center line based on the left and right curves.
+        
+        Args:
+            left_curve: Array of points [(x1,y1), (x2,y2), ...] for left curve
+            right_curve: Array of points for right curve
+            img: Image to draw on
+            start_at_bottom_third: Whether to only use bottom third of the image
+            
+        Returns:
+            Image with center line drawn
+        """
+        height, width = img.shape[:2]
+        result_img = img.copy()
+        
+        # Filter points to ensure we have matching y-coordinates
+        left_dict = {point[1]: point[0] for point in left_curve}
+        right_dict = {point[1]: point[0] for point in right_curve}
+        
+        # Find common y-coordinates
+        common_y = set(left_dict.keys()).intersection(set(right_dict.keys()))
+        
+        # For bottom third of the image
+        bottom_third_y = height * 2 // 3
+        if start_at_bottom_third:
+            common_y = [y for y in common_y if y >= bottom_third_y]
+        
+        # Calculate midpoints
+        midpoints = []
+        for y in common_y:
+            left_x = left_dict[y]
+            right_x = right_dict[y]
+            mid_x = (left_x + right_x) // 2
+            midpoints.append((mid_x, y))
+        
+        if len(midpoints) < 2:
+            print("Not enough points to create a center line")
+            return result_img, None, None, None
+        
+        # Convert to numpy array
+        midpoints = np.array(midpoints)
+        
+        # Fit a straight line using linear regression
+        x = midpoints[:, 0]
+        y = midpoints[:, 1]
+        
+        # Use polyfit to get the line parameters (degree 1 = straight line)
+        try:
+            slope, intercept = np.polyfit(y, x, 1)
+            
+            # Create the line endpoints
+            if start_at_bottom_third:
+                top_y = bottom_third_y
+            else:
+                top_y = 0
+            bottom_y = height - 1
+            
+            top_x = int(slope * top_y + intercept)
+            bottom_x = int(slope * bottom_y + intercept)
+            
+            # Draw the line
+            cv2.line(result_img, (top_x, top_y), (bottom_x, bottom_y), (0, 255, 0), 3)  # Green line
+            
+            # Draw a circle at the bottom point (optional)
+            cv2.circle(result_img, (bottom_x, bottom_y), 5, (0, 255, 0), -1)
+            
+            # Store the line endpoints for later use in steering calculations
+            center_line_top = (top_x, top_y)
+            center_line_bottom = (bottom_x, bottom_y)
+            
+            # Calculate the center line angle
+            angle = self.get_center_line_angle(center_line_top, center_line_bottom)
+            
+            # # Add angle to the image (optional)
+            # cv2.putText(result_img, f"Angle: {angle:.1f}°", 
+            #             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            
+            return result_img, center_line_top, center_line_bottom, angle
+            
+        except Exception as e:
+            print(f"Error fitting line: {e}")
+            return result_img, None, None, None
+    
+    def process_image(self, img):
+        """
+        Process an image and visualize the robot on the map.
+        
+        Args:
+            img: camera image
+            robot_x: Current robot x position (meters)
+            robot_y: Current robot y position (meters)
+            robot_angle: Current robot heading angle (degrees)
+        """
+        
+        # Convert to grayscale if not already
+        if len(img.shape) == 3:
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = img.copy()
+        
+        # Draw outline curves
+        outlined_image, left_curve, right_curve = self.draw_outline_curves(gray, img)
+        
+        # Create and draw center line
+        center_line_image, center_line_top, center_line_bottom, center_line_angle = self.create_center_line(left_curve, right_curve, outlined_image)
+        
+        return np.array(center_line_bottom, center_line_top), center_line_image
+
+            
 
 import matplotlib.pyplot as plt
 from optimze import MobotLocator
-from image_thesh import thresh_image
+from scipy.interpolate import CubicSpline
+
 def test_simple_path():
     chip = lgpio.gpiochip_open(4)
     # load path from csv "simple_path.csv", in the form x,y,t
-    path = np.loadtxt("map_processing/race_points.csv", delimiter=",", skiprows=1)
+    base_path = np.loadtxt("map_processing/race_points.csv", delimiter=",", skiprows=1)
 
-    path = path*np.array([1, 0.65])
+    base_path = base_path*np.array([1, 0.65])
 
     save_dir = "data/run_images"
     n = 0
@@ -439,120 +661,149 @@ def test_simple_path():
 
     input("press enter to start")
     mobot = MoBot(chip=chip, verbose=False)
-    mobot.set_path(path)   
+    
+    mobot.set_path(base_path)   
     time.sleep(0.5)
 
-    locator = MobotLocator(max_detlas=np.array([0.2, 0.2, 5]), step_size=np.array([0.01, 0.01, 1]), dist_penalty= 0.5, debug_print=False)
     map_renderer = MapRenderer("/home/pi/mobots_2025/map_processing/final_path.png")
-    while mobot.path_idx < len(mobot.path) - 2:
-        try:
-            # Initialize frame counter for statistics
-            frame_count = 0
-            start_time = time.time()
-            last_stats_time = start_time
+    locator = MobotLocator(max_detlas=np.array([0.5, 0.5]), step_size=np.array([0.1, 0.1]), dist_penalty=0.2, debug_print=False)
+    detector = CenterLineDetector()
+    try:
+        # Initialize frame counter for statistics
+        frame_count = 0
+        start_time = time.time()
+        last_stats_time = start_time
+        
+        # Main loop
+        while True:
+            # Read a frame from the camera
+            ret, frame = cap.read()
             
-            # Main loop
-            while True:
-                # Read a frame from the camera
-                ret, frame = cap.read()
-                
-                if not ret:
-                    assert False, "Error: Could not read frame"
-                    break
+            if not ret:
+                assert False, "Error: Could not read frame"
 
-                image_pose = np.array([mobot.x, mobot.y, mobot.theta*180/np.pi])
-                mobot_path = np.array([mobot.xs, mobot.ys]).copy().T
+            image_pose = np.array([mobot.x, mobot.y, mobot.theta*180/np.pi])
+            mobot_path = np.array([mobot.xs, mobot.ys]).copy().T
 
-                resized_image = cv2.resize(frame, (480, 270))
-                cam_mask = thresh_image(resized_image)  #threshold the image
+            frame_small = cv2.resize(frame, (480, 270))
 
-                use_dumb_method = True
-                if use_dumb_method:
-                    # get direction from thresh_image:
-                    croped_image = cam_mask[50:, :]
-                    # get the average across each column:
-                    column_sum = np.sum(croped_image, axis=0)
-                    sum_all = np.sum(column_sum)
-                    if sum_all == 0:
-                        print('no line detected')
-                        time.sleep(0.1)
-                        delta_pose = np.array([0, 0, 0])
-                        continue
-                    angle = np.linspace(-1, 1, 480)
-                    # avg angle
-                    avg_angle = np.sum(column_sum * angle) / sum_all
+            line_points, line_image = detector.process_image(frame_small) # returns the line points in the image
+            # two points [[x1, y1], [x2, y2]] - start and end of the line. In CV2 coordinate frame
+            
+            # use warp to convert the line points to the map coordinates:
 
-                    print(f"avg angle: {avg_angle}")
-                    K_angle = 0
+            scale = CALIB_IMAGE_SIZE[0]/480.0
+            line_points = np.array(line_points)*scale
 
-                    dir_theta = image_pose[2]*np.pi/180 + np.pi/2
+            # convert the line points to world coordinates:
+            line_points_world = np.array([pixel_to_world((x, y), TRANSFORM) for x, y in line_points])
 
-                    delta_pose = np.array([np.cos(dir_theta)*K_angle*avg_angle, 
-                                    np.sin(dir_theta)*K_angle*avg_angle, 
-                                    0])
+            # Set current location
+            current_location = np.array([0.0, 0.0])
 
-                    print(f"delta_pose: {delta_pose}")
-                elif np.mean(cam_mask) > 0.2*255:
-                    print('mask is too large. Line is probably not detected')
-                    # time.sleep(0.)
-                    delta_pose = np.array([0, 0, 0])
-                else:
-                    # run the locator
-                    delta_pose = locator.locate_image(cam_image=cam_mask, 
-                                                    x=image_pose[0], 
-                                                    y=image_pose[1], 
-                                                    theta=image_pose[2])
+            # Calculate line midpoint
+            line_midpoint = (line_points_world[0] + line_points_world[1]) / 2
+            line_endpoint = line_points_world[1]
 
-                    print(f"delta_pose: {delta_pose}")
-                    print(f"image_pose: {image_pose}")
-                
-                # update the mobot pose
-                mobot.x += delta_pose[0]*0
-                mobot.y += delta_pose[1]*0
-                mobot.theta += delta_pose[2]*np.pi/180*0
+            # Calculate line direction
+            line_direction = line_points_world[1] - line_points_world[0]
+            line_direction_normalized = line_direction / np.linalg.norm(line_direction)
 
-                # create the server image:
-                # sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
-                sim_image = np.zeros([270, 480, 3])
-                sim_image[:, :, 0] = cam_mask.copy()    
-                            
-                mobot_path_pix = locator.pose_to_pixel(mobot_path)
-                map_render = map_renderer.plot_path(mobot_path_pix, image_pose[2]*np.pi/180)
-                
-                server_image = np.zeros([270*2, 480*2, 3])
-                server_image[:270, :480] = resized_image
-                server_image[:270, 480:] = sim_image   
-                server_image[270:, :] = cv2.resize(map_render, (480*2, 270))             
-                
-                # Update the frame in the web server
-                server.update_frame(server_image)
-                
-                # Save the frame with timestamp
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
-                img_path = os.path.join(save_dir, f"image_{timestamp}.jpg")
-                cv2.imwrite(img_path, frame)
+            # PART 1: Fit spline from current location to line endpoint
+            # Control points for the spline
+            spline_control_points = np.vstack([
+                current_location,
+                line_midpoint,
+                line_endpoint
+            ])
 
-                # save the server image
-                img_path = os.path.join(save_dir, f"server_image_{timestamp}.jpg")
-                cv2.imwrite(img_path, server_image)
-                
-                # Update statistics
-                frame_count += 1
-                current_time = time.time()
-                if current_time - last_stats_time >= 5.0:
-                    fps = frame_count / (current_time - last_stats_time)
-                    print(f"Camera Loop at {fps:.2f} FPS, saved {frame_count} images")
-                    frame_count = 0
-                    last_stats_time = current_time
-                
-        except KeyboardInterrupt:
-            print("Interrupted by user")
-        finally:
-            # Clean up
-            mobot.stop()
-            cap.release()
-            server.stop()
-            print("Resources released and server stopped")
+            # Create parameter values for spline (using cumulative distance)
+            t = np.zeros(len(spline_control_points))
+            for i in range(1, len(spline_control_points)):
+                t[i] = t[i-1] + np.linalg.norm(spline_control_points[i] - spline_control_points[i-1])
+            t = t / t[-1]  # Normalize to [0,1]
+
+            # Fit the spline
+            spline_x = CubicSpline(t, spline_control_points[:, 0])
+            spline_y = CubicSpline(t, spline_control_points[:, 1])
+
+            # Generate points along the spline
+            num_spline_points = 30
+            t_values = np.linspace(0, 1, num_spline_points)
+            spline_points = np.column_stack((spline_x(t_values), spline_y(t_values)))
+
+            # PART 2: Create straight extension from line endpoint
+            extension_distance = 2.0  # Distance to extend beyond line endpoint
+            num_extension_points = 30
+
+            # Generate points along the straight extension
+            extension_t = np.linspace(0, 1, num_extension_points)
+            extension_points = np.array([
+                line_endpoint + t * extension_distance * line_direction_normalized
+                for t in extension_t
+            ])
+
+            delta_path = np.vstack((spline_points, extension_points))
+
+            # apply the mobots rotation and position to the delta_path:
+            # rotate the path by the mobots theta
+            theta = image_pose[2]*np.pi/180
+            rotation_matrix = np.array([
+                [np.cos(theta), -np.sin(theta)],
+                [np.sin(theta), np.cos(theta)]
+            ])
+            # rotate the path
+            rotated_path = delta_path @ rotation_matrix.T
+
+            # translate the path to the mobots position
+            new_path = rotated_path + np.array([image_pose[0], image_pose[1]])
+
+            
+            # update the mobot pose
+            mobot.set_path(new_path)
+
+            # create the server image:
+            # sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
+            sim_image = np.zeros([270, 480, 3])
+            sim_image[:, :, :] = line_image 
+                        
+            mobot_path_pix = locator.pose_to_pixel(mobot_path)
+            map_render = map_renderer.plot_path(mobot_path_pix, image_pose[2]*np.pi/180)
+            
+            server_image = np.zeros([270*2, 480*2, 3])
+            server_image[:270, :480] = cv2.resize(frame, (480, 270))
+            server_image[:270, 480:] = sim_image   
+            server_image[270:, :] = cv2.resize(map_render, (480*2, 270))             
+            
+            # Update the frame in the web server
+            server.update_frame(server_image)
+            
+            # Save the frame with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
+            img_path = os.path.join(save_dir, f"image_{timestamp}.jpg")
+            cv2.imwrite(img_path, frame)
+
+            # save the server image
+            img_path = os.path.join(save_dir, f"server_image_{timestamp}.jpg")
+            cv2.imwrite(img_path, server_image)
+            
+            # Update statistics
+            frame_count += 1
+            current_time = time.time()
+            if current_time - last_stats_time >= 5.0:
+                fps = frame_count / (current_time - last_stats_time)
+                print(f"Camera Loop at {fps:.2f} FPS, saved {frame_count} images")
+                frame_count = 0
+                last_stats_time = current_time
+            
+    except KeyboardInterrupt:
+        print("Interrupted by user")
+    finally:
+        # Clean up
+        mobot.stop()
+        cap.release()
+        server.stop()
+        print("Resources released and server stopped")
         
 
     input("press enter to stop")
