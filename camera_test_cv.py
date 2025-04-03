@@ -47,7 +47,7 @@ def main():
             # Save the frame with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
             img_path = os.path.join("data/images", f"image_{timestamp}.jpg")
-            cv2.imwrite(img_path, frame)
+            # cv2.imwrite(img_path, frame)
             
             # Update statistics
             frame_count += 1

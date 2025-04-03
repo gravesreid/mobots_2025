@@ -7,8 +7,6 @@ from math import sin, cos, radians
 import sys
 from io import StringIO
 from contextlib import redirect_stdout
-import sys
-sys.path.append("..")
 from image_transform_reverse_2 import real_coords_to_pixel_coords
 from image_transform_reverse_2 import get_warped_image
 
@@ -203,9 +201,9 @@ class Control:
             # Calculate the center line angle
             angle = self.get_center_line_angle(center_line_top, center_line_bottom)
             
-            # Add angle to the image (optional)
-            cv2.putText(result_img, f"Angle: {angle:.1f}°", 
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            # # Add angle to the image (optional)
+            # cv2.putText(result_img, f"Angle: {angle:.1f}°", 
+            #             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             
             return result_img, center_line_top, center_line_bottom, angle
             

@@ -185,7 +185,7 @@ class MobotLocator:
 
         return combo_image
 
-from image_thesh import thresh_image
+from image_thresh import thresh_image
 if __name__ == "__main__":
     # Load the map image
     # Create the MobotLocator object
