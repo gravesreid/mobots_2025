@@ -9,7 +9,7 @@ from headless_visualization import SimpleStreamServer
 import cv2
 from datetime import datetime
 import threading
-from camera import main as camera_main
+from camera import main as camera_main, get_line_state
 
 
 lock = threading.Lock()
@@ -383,12 +383,28 @@ from optimze import MobotLocator
 from image_thresh import thresh_image
 def test_simple_path():
     chip = lgpio.gpiochip_open(4)
-    camera_main() # visualize what mobot is seeing
 
-    input("press enter to start")
-    mobot = MoBot(chip=chip, verbose=False)
-    mobot.set_path(path)   
-    time.sleep(0.5)
+    # Start camera in a separate thread
+    camera_thread = threading.Thread(target=camera_main)
+    camera_thread.daemon = True
+    camera_thread.start()
+
+    # Wait for camera to initialize
+    time.sleep(2)
+
+    # Now you can check the line state in your main loop
+    line_found = get_line_state()
+    if line_found:
+        # Do something with the line
+        print("Line found!")
+    else:
+        # Line not found, do something else
+        print("No line found")
+
+    # # input("press enter to start")
+    # mobot = MoBot(chip=chip, verbose=False)
+    # # mobot.set_path(path)   
+    # time.sleep(0.5)
 
     # locator = MobotLocator(max_detlas=np.array([0.2, 0.2, 5]), step_size=np.array([0.01, 0.01, 1]), dist_penalty= 0.5, debug_print=False)
     # map_renderer = MapRenderer("/home/pi/mobots_2025/map_processing/final_path.png")
