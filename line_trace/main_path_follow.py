@@ -392,140 +392,96 @@ def test_simple_path():
     # Wait for camera to initialize
     time.sleep(2)
 
-    # Now you can check the line state in your main loop
-    line_found = get_line_state()
-    if line_found:
-        # Do something with the line
-        print("Line found!")
-    else:
-        # Line not found, do something else
-        print("No line found")
-
-    # # input("press enter to start")
-    # mobot = MoBot(chip=chip, verbose=False)
-    # # mobot.set_path(path)   
-    # time.sleep(0.5)
-
-    # locator = MobotLocator(max_detlas=np.array([0.2, 0.2, 5]), step_size=np.array([0.01, 0.01, 1]), dist_penalty= 0.5, debug_print=False)
-    # map_renderer = MapRenderer("/home/pi/mobots_2025/map_processing/final_path.png")
-    # while mobot.path_idx < len(mobot.path) - 2:
-    #     try:
-    #         # Initialize frame counter for statistics
-    #         frame_count = 0
-    #         start_time = time.time()
-    #         last_stats_time = start_time
+    # Initialize robot
+    mobot = MoBot(chip=chip, verbose=False)
+    
+    # PID controller parameters
+    k_p = 0.2  # Proportional gain
+    k_i = 0.05  # Integral gain
+    k_d = 0.1   # Derivative gain
+    
+    # Base speed - adjust based on your robot's capabilities
+    base_speed = 0.2  # Start slower for safety
+    
+    # PID state variables
+    error_integral = 0
+    last_error = 0
+    last_time = time.time()
+    
+    # Last valid center line angle
+    last_angle = 0
+    
+    # Initialize motor PWM values
+    left_pwm = base_speed
+    right_pwm = base_speed
+    
+    try:
+        # Main control loop
+        while True:
+            current_time = time.time()
+            dt = current_time - last_time
+            last_time = current_time
             
-    #         # Main loop
-    #         while True:
-    #             # Read a frame from the camera
-    #             ret, frame = cap.read()
+            # Limit dt to avoid large jumps after pauses
+            dt = min(dt, 0.1)
+            
+            # Check if line is found and get center line angle
+            line_found, center_angle = get_line_state()
+            
+            if line_found:
+                # Use the actual angle from the camera
+                angle = center_angle
                 
-    #             if not ret:
-    #                 assert False, "Error: Could not read frame"
-    #                 break
-
-    #             image_pose = np.array([mobot.x, mobot.y, mobot.theta*180/np.pi])
-    #             mobot_path = np.array([mobot.xs, mobot.ys]).copy().T
-
-    #             resized_image = cv2.resize(frame, (480, 270))
-    #             cam_mask = thresh_image(resized_image)  #threshold the image
-
-    #             use_dumb_method = True
-    #             if use_dumb_method:
-    #                 # get direction from thresh_image:
-    #                 croped_image = cam_mask[50:, :]
-    #                 # get the average across each column:
-    #                 column_sum = np.sum(croped_image, axis=0)
-    #                 sum_all = np.sum(column_sum)
-    #                 if sum_all == 0:
-    #                     print('no line detected')
-    #                     time.sleep(0.1)
-    #                     delta_pose = np.array([0, 0, 0])
-    #                     continue
-    #                 angle = np.linspace(-1, 1, 480)
-    #                 # avg angle
-    #                 avg_angle = np.sum(column_sum * angle) / sum_all
-
-    #                 print(f"avg angle: {avg_angle}")
-    #                 K_angle = 0
-
-    #                 dir_theta = image_pose[2]*np.pi/180 + np.pi/2
-
-    #                 delta_pose = np.array([np.cos(dir_theta)*K_angle*avg_angle, 
-    #                                 np.sin(dir_theta)*K_angle*avg_angle, 
-    #                                 0])
-
-    #                 print(f"delta_pose: {delta_pose}")
-    #             elif np.mean(cam_mask) > 0.2*255:
-    #                 print('mask is too large. Line is probably not detected')
-    #                 # time.sleep(0.)
-    #                 delta_pose = np.array([0, 0, 0])
-    #             else:
-    #                 # run the locator
-    #                 delta_pose = locator.locate_image(cam_image=cam_mask, 
-    #                                                 x=image_pose[0], 
-    #                                                 y=image_pose[1], 
-    #                                                 theta=image_pose[2])
-
-    #                 print(f"delta_pose: {delta_pose}")
-    #                 print(f"image_pose: {image_pose}")
+                # Calculate steering error
+                # The angle represents deviation from center
+                # Positive angle means the line is to the right (need to turn right)
+                # Negative angle means the line is to the left (need to turn left)
+                error = angle
                 
-    #             # update the mobot pose
-    #             mobot.x += delta_pose[0]*0
-    #             mobot.y += delta_pose[1]*0
-    #             mobot.theta += delta_pose[2]*np.pi/180*0
-
-    #             # create the server image:
-    #             # sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
-    #             sim_image = np.zeros([270, 480, 3])
-    #             sim_image[:, :, 0] = cam_mask.copy()    
-                            
-    #             mobot_path_pix = locator.pose_to_pixel(mobot_path)
-    #             map_render = map_renderer.plot_path(mobot_path_pix, image_pose[2]*np.pi/180)
+                # PID control
+                error_integral += error * dt
+                error_integral = np.clip(error_integral, -1.0, 1.0)  # Anti-windup
                 
-    #             server_image = np.zeros([270*2, 480*2, 3])
-    #             server_image[:270, :480] = resized_image
-    #             server_image[:270, 480:] = sim_image   
-    #             server_image[270:, :] = cv2.resize(map_render, (480*2, 270))             
+                error_derivative = (error - last_error) / dt if dt > 0 else 0
+                last_error = error
                 
-    #             # Update the frame in the web server
-    #             server.update_frame(server_image)
+                # Calculate steering command using PID
+                steering = k_p * error + k_i * error_integral + k_d * error_derivative
                 
-    #             # Save the frame with timestamp
-    #             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Format: YYYYMMDD_HHMMSS_mmm
-    #             img_path = os.path.join(save_dir, f"image_{timestamp}.jpg")
-    #             cv2.imwrite(img_path, frame)
-
-    #             # save the server image
-    #             img_path = os.path.join(save_dir, f"server_image_{timestamp}.jpg")
-    #             cv2.imwrite(img_path, server_image)
+                # Apply steering to motor commands
+                left_pwm = base_speed - steering
+                right_pwm = base_speed + steering
                 
-    #             # Update statistics
-    #             frame_count += 1
-    #             current_time = time.time()
-    #             if current_time - last_stats_time >= 5.0:
-    #                 fps = frame_count / (current_time - last_stats_time)
-    #                 print(f"Camera Loop at {fps:.2f} FPS, saved {frame_count} images")
-    #                 frame_count = 0
-    #                 last_stats_time = current_time
+                # Remember last valid angle
+                last_angle = angle
                 
-    #     except KeyboardInterrupt:
-    #         print("Interrupted by user")
-    #     finally:
-    #         # Clean up
-    #         mobot.stop()
-    #         cap.release()
-    #         server.stop()
-    #         print("Resources released and server stopped")
-        
-
-    # input("press enter to stop")
-    # plt.figure()
-    # plt.plot(mobot.xs, mobot.ys)
-    # plt.plot(mobot.path[:, 0], mobot.path[:, 1])
-    # # save the plot
-    # plt.savefig('test_plot2.png')
-    # print('killed')
+                print(f"Line found! Angle: {angle:.2f}°, Steering: {steering:.2f}")
+            else:
+                print("No line found. Continuing on previous path")
+                # Gradually reduce the differential to go straighter
+                # Robot should go straight when no line is found
+                left_pwm = 0.9 * left_pwm + 0.1 * base_speed
+                right_pwm = 0.9 * right_pwm + 0.1 * base_speed
+            
+            # Ensure PWM values are within limits
+            left_pwm = np.clip(left_pwm, -0.5, 0.5)
+            right_pwm = np.clip(right_pwm, -0.5, 0.5)
+            
+            # Apply the motor values
+            mobot.set_motor_pwms((left_pwm, right_pwm))
+            
+            # Print current motor values for debugging
+            print(f"Motors: L={left_pwm:.2f}, R={right_pwm:.2f}")
+            
+            # Small delay to prevent tight loop
+            time.sleep(0.05)
+            
+    except KeyboardInterrupt:
+        print("Interrupted by user")
+    finally:
+        # Clean up
+        mobot.stop()
+        print("Resources released")
 
 if __name__ == "__main__":
     # encoder_test(17)

@@ -10,11 +10,12 @@ sys.path.append("..")
 from headless_visualization import SimpleStreamServer
 from control import Control
 
-# Use a simple global variable - no class needed for just a boolean
+# Use global variables for line state information
 found_line = False
+center_angle = 0.0  # Add a variable to store the center line angle
 
 def main():
-    global found_line
+    global found_line, center_angle
     control = Control()
     # Start the stream server
     server = SimpleStreamServer(port=8080)
@@ -33,6 +34,8 @@ def main():
         while True:
             # Read a frame from the camera
             ret, frame = cap.read()
+            frame = cv2.resize(frame, (480, 270))
+
             
             if not ret:
                 print("Error: Could not read frame")
@@ -101,19 +104,29 @@ def main():
                 largest_mask_bgr = cv2.resize(largest_mask_bgr, (int(mask_width * height / mask_height), height))
 
             if largest_mask_bgr is not None and np.any(largest_mask_bgr):
-                try:
-                    # Draw the outline curves
-                    result_img, left_curve, right_curve = control.draw_outline_curves(largest_mask_bgr, largest_mask_bgr.copy())
+                # Check if too much of the image is white (false detection)
+                white_pixel_count = np.sum(largest_mask > 0)
+                total_pixels = largest_mask.shape[0] * largest_mask.shape[1]
+                white_ratio = white_pixel_count / total_pixels
+                
+                # If more than 2/3 of the image is white, consider it a false detection
+                if white_ratio > 2/3:
+                    print(f"False detection - too much white ({white_ratio:.2f})")
+                else:
+                    try:
+                        # Draw the outline curves
+                        result_img, left_curve, right_curve = control.draw_outline_curves(largest_mask_bgr, largest_mask_bgr.copy())
 
-                    # Create center line
-                    center_line_image, center_line_top, center_line_bottom, center_line_angle = control.create_center_line(left_curve, right_curve, frame)
-                    
-                    if center_line_top is not None and center_line_bottom is not None:
-                        frame = center_line_image  # Use the image with the center line drawn
-                        found_line = True
-                        print("Line found!")
-                except Exception as e:
-                    print(f"Error processing line: {e}")
+                        # Create center line
+                        center_line_image, center_line_top, center_line_bottom, center_line_angle = control.create_center_line(left_curve, right_curve, frame)
+                        
+                        if center_line_top is not None and center_line_bottom is not None:
+                            frame = center_line_image  # Use the image with the center line drawn
+                            found_line = True
+                            center_angle = center_line_angle  # Store the center line angle
+                            print(f"Line found! Angle: {center_angle:.2f}°")
+                    except Exception as e:
+                        print(f"Error processing line: {e}")
 
             # Create side-by-side display
             combined = np.hstack((frame, largest_mask_bgr))
@@ -122,9 +135,24 @@ def main():
             cv2.putText(combined, "Original", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
             cv2.putText(combined, "Contiguous Mask", (width + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
             
-            # Show line status
-            status = "Line Found!" if found_line else "No Line"
-            cv2.putText(combined, status, (10, height-20), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            # Add angle information
+            if found_line:
+                angle_text = f"Line Angle: {center_angle:.2f}°"
+                cv2.putText(combined, angle_text, (10, height), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 200), 2)
+                
+                # Add steering direction indicator
+                if center_angle > 0:
+                    direction = "Steering Right"
+                elif center_angle < 0:
+                    direction = "Steering Left"
+                else:
+                    direction = "Straight"
+                    
+                cv2.putText(combined, direction, (width // 2 - 80, height - 20), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            else:
+                cv2.putText(combined, "No Line Detected", (10, height - 20), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
             
             # Update the frame in the web server
             server.update_frame(combined)
@@ -138,9 +166,9 @@ def main():
         print("Resources released and server stopped")
 
 def get_line_state():
-    """Function to access line found status from outside this module"""
-    global found_line
-    return found_line
+    """Function to access line found status and center line angle from outside this module"""
+    global found_line, center_angle
+    return found_line, center_angle
 
 if __name__ == "__main__":
     main()
