@@ -23,7 +23,7 @@ class MobotLocator:
     PIXEL_SIZE = 0.03 # 3 cm
     ORIGIN_PIXEL = (2215.0, 178.0)
     CALIBRATION_PIXELS = [(1142, 629), (245, 239), (1025, 145), (1878, 276)]
-    CALIBRATION_LOCS = [(1, 0), (2, 1), (3, 0), (2, -1)]
+    CALIBRATION_LOCS = [(0.34, 0), (0.68, 0.34), (1.02, 0), (0.68, -0.34)]
     CALIB_IMAGE_SIZE = (1920, 1080)
 
     def __init__(self, max_detlas: np.ndarray, step_size: np.ndarray, dist_penalty: float = 0.2, debug_print: bool = False):

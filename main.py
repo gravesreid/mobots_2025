@@ -6,6 +6,7 @@ import os
 from headless_visualization import SimpleStreamServer
 import cv2
 from datetime import datetime
+import threading
 
 class MapRenderer():
     def __init__(self, map_path:str, line_step:int = 10):
@@ -13,21 +14,32 @@ class MapRenderer():
         self.path_idx = 0
         self.line_step = line_step
 
-    def plot_path(self, path:np.ndarray):
+    def plot_path(self, path:np.ndarray, angle:float = 0) -> np.ndarray:
         # update the line from the last point to the current point
+        if len(path) < 2:
+            return self.base_map
         for i in range(self.path_idx, len(path) - 1, self.line_step):
+            self.path_idx = i
             print("path i", path[i])
             cv2.line(self.base_map, tuple(path[i].astype(np.int64)), tuple(path[i+1].astype(np.int64)), (0, 0, 255), 4)
 
-        self.path_idx = i + 1
         
         map_image = self.base_map.copy()
         # add the last point
         cv2.circle(map_image, tuple(path[-1].astype(np.int64)), 10, (255, 0, 0), -1)
 
+        # add a line to show the heading
+        x = path[-1][0]
+        y = path[-1][1]
+        x2 = x - 20*np.cos(angle)
+        y2 = y + 20*np.sin(angle)
+
+        cv2.line(map_image, (int(x), int(y)), (int(x2), int(y2)), (0, 255, 0), 4)
+
         return map_image
 
 
+lock = threading.Lock()
 
 class MoBot():
     ENA1, IN1_A, IN1_B = 13, 6, 5  # Motor 1
@@ -41,8 +53,7 @@ class MoBot():
     MOTOR1_GAIN = 1
     MOTOR2_GAIN = -1
 
-    MOTOR1_LIM = [0, 0.2]
-    MOTOR2_LIM = [-0.2, 0]
+    PWM_LIM = [-0.1, 0.3]
 
     goal_x = 0
     goal_y = 0
@@ -81,7 +92,9 @@ class MoBot():
         # self._last_dist_error = 0.0
 
         self._integral_speed = 0.0
-        self._last_pos = np.array([0, 0])
+        self._last_tot_dist = 0.0
+
+        self._integral_dist = 0.0
 
         self._last_time = time.time()
 
@@ -94,18 +107,19 @@ class MoBot():
 
     
     def callback(self, chip, gpio, level, timestamp):
-        if gpio == self.ENCODER1:
-            self.encoder1_count += 1
-            theta_new = self.theta + self.TICK_DIST/(self.WIDTH)
-            self.x += 0.5*self.WIDTH*(np.sin(theta_new) - np.sin(self.theta))
-            self.y += 0.5*self.WIDTH*(-np.cos(theta_new) + np.cos(self.theta))
-        elif gpio == self.ENCODER2:
-            self.encoder2_count += 1
-            theta_new = self.theta - self.TICK_DIST/(self.WIDTH)
-            self.x += 0.5*self.WIDTH*(-np.sin(theta_new) + np.sin(self.theta))
-            self.y += 0.5*self.WIDTH*(np.cos(theta_new) - np.cos(self.theta))
-        else:
-            assert NotImplementedError, f"gpio pin {gpio} not recognized"
+        with lock:
+            if gpio == self.ENCODER1:
+                self.encoder1_count += 1
+                theta_new = self.theta + self.TICK_DIST/(self.WIDTH)
+                self.x += 0.5*self.WIDTH*(np.sin(theta_new) - np.sin(self.theta))
+                self.y += 0.5*self.WIDTH*(-np.cos(theta_new) + np.cos(self.theta))
+            elif gpio == self.ENCODER2:
+                self.encoder2_count += 1
+                theta_new = self.theta - self.TICK_DIST/(self.WIDTH)
+                self.x += 0.5*self.WIDTH*(-np.sin(theta_new) + np.sin(self.theta))
+                self.y += 0.5*self.WIDTH*(np.cos(theta_new) - np.cos(self.theta))
+            else:
+                assert NotImplementedError, f"gpio pin {gpio} not recognized"
         
        
         self.theta = theta_new
@@ -126,9 +140,27 @@ class MoBot():
         self.follow_path_control()
 
 
-    def set_motor_pwms(self, pwms):
-        pwm1 = np.clip(pwms[0] * self.MOTOR1_GAIN, self.MOTOR1_LIM[0], self.MOTOR1_LIM[1])
-        pwm2 = np.clip(pwms[1] * self.MOTOR2_GAIN, self.MOTOR2_LIM[0], self.MOTOR2_LIM[1])
+    def set_motor_pwms(self, pwms):     
+        pwms = np.array(pwms)
+
+        diff = pwms[0] - pwms[1]
+
+        # #1 proprity is to keep the diff the same, if possible. If not, scale it down
+        if np.abs(diff) > self.PWM_LIM[1] - self.PWM_LIM[0]:
+            if diff > 0:
+                pwms[0] = self.PWM_LIM[1]
+                pwms[1] = self.PWM_LIM[0]
+            else:
+                pwms[0] = self.PWM_LIM[0]
+                pwms[1] = self.PWM_LIM[1]
+        elif max(pwms) > self.PWM_LIM[1]:
+            # move the pwms linearly to make them fit.
+            pwms = pwms -(max(pwms) - self.PWM_LIM[1])
+        elif min(pwms) < self.PWM_LIM[0]:
+            pwms = pwms + (self.PWM_LIM[0] - min(pwms))
+
+        pwm1 = pwms[0]*self.MOTOR1_GAIN
+        pwm2 = pwms[1]*self.MOTOR2_GAIN
 
         self._set_motor(self.ENA1, self.IN1_A, self.IN1_B, pwm1)
         self._set_motor(self.ENA2, self.IN2_A, self.IN2_B, pwm2)
@@ -237,26 +269,35 @@ class MoBot():
             print('reached end of path')
             self.set_motor_pwms((0, 0))
             return
-        GOAL_SPEED = 1 # m/s
+        GOAL_SPEED = 2 # m/s
         LOOK_AHEAD = 1 # m
-        DEVIATION_THRESH = 1 # m - the relative importance of moving back to the line. W_LOOK = min(distance_from_line / DEVIATION_THRESH, 1)
+        DEVIATION_THRESH = 0.15 # m - the relative importance of moving back to the line. W_LOOK = min(distance_from_line / DEVIATION_THRESH, 1)
 
-        KP_ANGLE = 0.25
+        KP_ANGLE = 0.2
         KI_ANGLE = 0
-        KD_ANGLE = 0.05
+        KD_ANGLE = 0.025
 
-        KP_SPEED = 0.25
+        KP_SPEED = 0.5
         KI_SPEED = 0
 
+        KI_DIST = 0.02
+
         dt = time.time() - self.last_time
-        dt = max(dt, 0.25) # max time step of 0.25s. If its longer, there is probably a problem
+        self.last_time = time.time()
+        dt = min(dt, 0.25) # max time step of 0.25s. If its longer, there is probably a problem
         pos = np.array([self.x, self.y])
 
-        speed = np.linalg.norm(self._last_pos - pos) / dt
+        avg_encoder = (self.encoder1_count + self.encoder2_count) / 2
+        total_distance = avg_encoder * self.TICK_DIST
+
+        speed = (total_distance - self._last_tot_dist) / dt
+        self._last_tot_dist = total_distance
         speed = np.clip(speed, 0, 10) # clip the speed to 10 m/s. It should not be more than that
 
         speed_error = GOAL_SPEED - speed
         self._integral_speed += speed_error * dt
+
+        self._integral_speed = np.clip(self._integral_speed, 0, 20)
 
 
         # only move forward in the path. Check to see if we are closer to the next point
@@ -285,6 +326,10 @@ class MoBot():
         # and the tangent vector of the path (unit vector)
 
         dist = np.cross(pos - self.path[self.path_idx], tangent / np.linalg.norm(tangent))
+        
+
+        self._integral_dist += dist * dt
+        self._integral_dist = np.clip(self._integral_dist, -10, 10)
         if self.verbose:
             print('dist:', dist)
 
@@ -298,22 +343,36 @@ class MoBot():
             look_dist += np.linalg.norm(self.path[look_idx] - self.path[look_idx - 1])
         
         # get look_heading:
-        tangent = self.path[look_idx] - self.path[look_idx - 1]
-        look_heading = np.arctan2(tangent[1], tangent[0])
+        look_vec = self.path[look_idx] - pos
+        look_heading = np.arctan2(look_vec[1], look_vec[0])
 
         w_look = min(np.abs(dist) / DEVIATION_THRESH, 1)
         goal_heading = w_look * look_heading + (1 - w_look) * path_heading
 
-        angle_error = goal_heading - self.theta
+        # add dist integral term
+        angle_error = goal_heading - self.theta + KI_DIST * self._integral_dist
+
+        # print('angle_error:', angle_error)
 
         # wrap the angle error
         angle_error = np.arctan2(np.sin(angle_error), np.cos(angle_error))
 
         angle_error_dot = (angle_error - self._last_theta_error) / dt
         self._integral_theta += angle_error * dt
+        self._integral_theta = np.clip(self._integral_theta, -2, 2)
 
         pwm_angle = KP_ANGLE * angle_error + KI_ANGLE * self._integral_theta + KD_ANGLE * angle_error_dot
         pwm_speed = KP_SPEED * speed_error + KI_SPEED * self._integral_speed
+
+        pwm_speed = max(pwm_speed, 0.1) # make sure the robot is always moving
+        if self.verbose:
+            print('pwm_speed:', pwm_speed)
+            print('pwm_angle:', pwm_angle)
+            print('speed_error:', speed_error)
+            print('angle_error:', angle_error)
+            print('integral_theta:', self._integral_theta)
+            print('integral_speed:', self._integral_speed)
+            print('integral_dist:', self._integral_dist)
 
         pwm_1 = pwm_speed + pwm_angle
         pwm_2 = pwm_speed - pwm_angle
@@ -326,10 +385,8 @@ from optimze import MobotLocator
 from image_thesh import thresh_image
 def test_simple_path():
     chip = lgpio.gpiochip_open(4)
-    mobot = MoBot(chip=chip, verbose=False)
     # load path from csv "simple_path.csv", in the form x,y,t
     path = np.loadtxt("map_processing/race_points.csv", delimiter=",", skiprows=1)
-    mobot.set_path(path)
 
     save_dir = "data/run_images"
     n = 0
@@ -350,7 +407,12 @@ def test_simple_path():
             print("Error: Could not read frame")
             break
 
-    locator = MobotLocator(max_detlas=np.array([0.1, 0.1, 10]), step_size=np.array([0.01, 0.01, 1]), debug_print=False)
+    input("press enter to start")
+    mobot = MoBot(chip=chip, verbose=True)
+    mobot.set_path(path)   
+    time.sleep(0.5)
+
+    locator = MobotLocator(max_detlas=np.array([0.2, 0.2, 20]), step_size=np.array([0.01, 0.01, 1]), dist_penalty= 0.5, debug_print=False)
     map_renderer = MapRenderer("/home/pi/mobots_2025/map_processing/final_path.png")
     while mobot.path_idx < len(mobot.path) - 2:
         try:
@@ -374,7 +436,7 @@ def test_simple_path():
                 resized_image = cv2.resize(frame, (480, 270))
                 cam_mask = thresh_image(resized_image)  #threshold the image
 
-                if np.sum(cam_mask) > 0.2*cam_mask.shape[0]*cam_mask.shape[1]:
+                if np.mean(cam_mask) > 0.2*255:
                     print('mask is too large. Line is probably not detected')
                     time.sleep(0.)
                     delta_pose = np.array([0, 0, 0])
@@ -389,15 +451,15 @@ def test_simple_path():
                     print(f"image_pose: {image_pose}")
                 
                 # update the mobot pose
-                mobot.x += delta_pose[0]
-                mobot.y += delta_pose[1]
-                mobot.theta += delta_pose[2]*np.pi/180
+                mobot.x += delta_pose[0]*0.1
+                mobot.y += delta_pose[1]*0.1
+                mobot.theta += delta_pose[2]*np.pi/180*0.25
 
                 # create the server image:
                 sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
                 
                 mobot_path_pix = locator.pose_to_pixel(mobot_path)
-                map_render = map_renderer.plot_path(mobot_path_pix)
+                map_render = map_renderer.plot_path(mobot_path_pix, image_pose[2]*np.pi/180)
                 
                 server_image = np.zeros([270*2, 480*2, 3])
                 server_image[:270, :480] = resized_image
@@ -429,6 +491,7 @@ def test_simple_path():
             print("Interrupted by user")
         finally:
             # Clean up
+            mobot.stop()
             cap.release()
             server.stop()
             print("Resources released and server stopped")
