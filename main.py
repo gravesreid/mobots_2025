@@ -42,7 +42,7 @@ lock = threading.Lock()
 
 class MoBot():
     ENA1, IN1_A, IN1_B = 13, 6, 5  # Motor 1
-    ENCODER1 = 20
+    ENCODER1 = 16
     ENA2, IN2_A, IN2_B = 12, 24, 23  # Motor 2
     ENCODER2 = 17
     TICK_DIST = 0.009
@@ -103,6 +103,7 @@ class MoBot():
         self.xs = []
         self.ys = []
         self.thetas = []
+        self.speed = 0
 
     
     def callback(self, chip, gpio, level, timestamp):
@@ -196,8 +197,8 @@ class MoBot():
         lgpio.tx_pwm(self.chip, ena, freq, duty_cycle)
 
     def stop(self):
-        lgpio.tx_pwm(self.chip, self.ENA1, 0, 0)
-        lgpio.tx_pwm(self.chip, self.ENA2, 0, 0)
+        # lgpio.tx_pwm(self.chip, self.ENA1, 0, 0)
+        # lgpio.tx_pwm(self.chip, self.ENA2, 0, 0)
 
         # set all directions to 0
         lgpio.gpio_write(self.chip, self.IN1_A, 0)
@@ -307,14 +308,16 @@ class MoBot():
         avg_encoder = (self.encoder1_count + self.encoder2_count) / 2
         total_distance = avg_encoder * self.TICK_DIST
 
-        speed = (total_distance - self._last_tot_dist) / dt
+        cur_speed = np.clip((total_distance - self._last_tot_dist) / dt, 0, 10)
+
+        w_speed = 0.2
+        self.speed = w_speed*cur_speed + (1 - w_speed) * self.speed
 
         if self.verbose:
-            print('speed:', speed)
+            print('speed:', self.speed)
         self._last_tot_dist = total_distance
-        speed = np.clip(speed, 0, 10) # clip the speed to 10 m/s. It should not be more than that
 
-        speed_error = GOAL_SPEED - speed
+        speed_error = GOAL_SPEED - self.speed
         self._integral_speed += speed_error * dt
 
         self._integral_speed = np.clip(self._integral_speed, 0, 20)
@@ -329,7 +332,7 @@ class MoBot():
             cur_dist = np.linalg.norm(self.path[self.path_idx] - pos)
             next_dist = np.linalg.norm(self.path[self.path_idx + 1] - pos)
 
-            if self.path[0] < pos[0]:
+            if self.path[self.path_idx][0] < pos[0]:
                 # we always move forward (+x direction)
                 self.path_idx += 1
                 continue
@@ -389,7 +392,7 @@ class MoBot():
         pwm_angle = KP_ANGLE * angle_error + KI_ANGLE * self._integral_theta + KD_ANGLE * angle_error_dot
         pwm_speed = KP_SPEED * speed_error + KI_SPEED * self._integral_speed
 
-        pwm_speed = max(pwm_speed, 0.1) # make sure the robot is always moving
+        # pwm_speed = max(pwm_speed, 0.1) # make sure the robot is always moving
         if self.verbose:
             print('pwm_speed:', pwm_speed)
             print('pwm_angle:', pwm_angle)
@@ -431,7 +434,7 @@ def test_simple_path():
     for _ in range(30):
         ret, frame = cap.read()
         if not ret:
-            print("Error: Could not read frame")
+            assert False, "Error: Could not read frame"
             break
 
     input("press enter to start")
@@ -439,7 +442,7 @@ def test_simple_path():
     mobot.set_path(path)   
     time.sleep(0.5)
 
-    locator = MobotLocator(max_detlas=np.array([0.2, 0.2, 20]), step_size=np.array([0.01, 0.01, 1]), dist_penalty= 0.5, debug_print=False)
+    locator = MobotLocator(max_detlas=np.array([0.2, 0.2, 5]), step_size=np.array([0.01, 0.01, 1]), dist_penalty= 0.5, debug_print=False)
     map_renderer = MapRenderer("/home/pi/mobots_2025/map_processing/final_path.png")
     while mobot.path_idx < len(mobot.path) - 2:
         try:
@@ -454,7 +457,7 @@ def test_simple_path():
                 ret, frame = cap.read()
                 
                 if not ret:
-                    print("Error: Could not read frame")
+                    assert False, "Error: Could not read frame"
                     break
 
                 image_pose = np.array([mobot.x, mobot.y, mobot.theta*180/np.pi])
@@ -463,9 +466,35 @@ def test_simple_path():
                 resized_image = cv2.resize(frame, (480, 270))
                 cam_mask = thresh_image(resized_image)  #threshold the image
 
-                if np.mean(cam_mask) > 0.2*255:
+                use_dumb_method = True
+                if use_dumb_method:
+                    # get direction from thresh_image:
+                    croped_image = cam_mask[50:, :]
+                    # get the average across each column:
+                    column_sum = np.sum(croped_image, axis=0)
+                    sum_all = np.sum(column_sum)
+                    if sum_all == 0:
+                        print('no line detected')
+                        time.sleep(0.1)
+                        delta_pose = np.array([0, 0, 0])
+                        continue
+                    angle = np.linspace(-1, 1, 480)
+                    # avg angle
+                    avg_angle = np.sum(column_sum * angle) / sum_all
+
+                    print(f"avg angle: {avg_angle}")
+                    K_angle = 0
+
+                    dir_theta = image_pose[2]*np.pi/180 + np.pi/2
+
+                    delta_pose = np.array([np.cos(dir_theta)*K_angle*avg_angle, 
+                                    np.sin(dir_theta)*K_angle*avg_angle, 
+                                    0])
+
+                    print(f"delta_pose: {delta_pose}")
+                elif np.mean(cam_mask) > 0.2*255:
                     print('mask is too large. Line is probably not detected')
-                    time.sleep(0.)
+                    # time.sleep(0.)
                     delta_pose = np.array([0, 0, 0])
                 else:
                     # run the locator
@@ -483,8 +512,10 @@ def test_simple_path():
                 mobot.theta += delta_pose[2]*np.pi/180*0
 
                 # create the server image:
-                sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
-                
+                # sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
+                sim_image = np.zeros([270, 480, 3])
+                sim_image[:, :, 0] = cam_mask.copy()    
+                            
                 mobot_path_pix = locator.pose_to_pixel(mobot_path)
                 map_render = map_renderer.plot_path(mobot_path_pix, image_pose[2]*np.pi/180)
                 
