@@ -151,7 +151,7 @@ class Control:
         common_y = set(left_dict.keys()).intersection(set(right_dict.keys()))
         
         # For bottom third of the image
-        bottom_third_y = height * 2 // 3
+        bottom_third_y = height *  1 // 3
         if start_at_bottom_third:
             common_y = [y for y in common_y if y >= bottom_third_y]
         
