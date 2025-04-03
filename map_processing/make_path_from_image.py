@@ -30,7 +30,7 @@ class ImagePathCreator:
         self.dragging = False
         
         # First point hardcoded location (x, y) as specified
-        self.first_point = (2418.8, 175.3)
+        self.first_point = (2215, 178)
         
         # Create GUI components
         self.create_widgets()
@@ -490,10 +490,13 @@ def process_path(csv_file, output_file, pixel_to_meter=0.03, spacing=0.05, smoot
 
 # Main execution
 if __name__ == "__main__":
+    # Run the GUI application to create path points
+    # run_app()
+    # exit()
     # ====== EDIT THESE VARIABLES AS NEEDED ======
     # Input/output files
-    INPUT_CSV_FILE = "/home/aigeorge/projects/mobots_2025/map_processing/test_points_pix.csv"  # Change to your input CSV file path
-    OUTPUT_CSV_FILE = "/home/aigeorge/projects/mobots_2025/map_processing/test_points_processed.csv"  # Change to your desired output file path
+    INPUT_CSV_FILE = "map_processing/test_points_pix_race_2215_178.csv"  # Change to your input CSV file path
+    OUTPUT_CSV_FILE = "map_processing/race_points.csv"  # Change to your desired output file path
 
     # Conversion parameters
     PIXEL_TO_METER = 0.03  # Conversion factor: 1 pixel = 0.03 meters
