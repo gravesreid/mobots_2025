@@ -329,6 +329,11 @@ class MoBot():
             cur_dist = np.linalg.norm(self.path[self.path_idx] - pos)
             next_dist = np.linalg.norm(self.path[self.path_idx + 1] - pos)
 
+            if self.path[0] < pos[0]:
+                # we always move forward (+x direction)
+                self.path_idx += 1
+                continue
+
             if next_dist < cur_dist:
                 self.path_idx += 1
             else:  

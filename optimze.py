@@ -138,7 +138,7 @@ class MobotLocator:
 
         return pose - init_pose
     
-    def pose_to_pixel(self, pose: np.ndarray) -> Tuple[int, int]:
+    def pose_to_pixel(self, pose: np.ndarray, scale = np.array([1, 0.65])) -> Tuple[int, int]:
         """
         Convert the pose to pixel coordinates.
         
@@ -148,6 +148,7 @@ class MobotLocator:
         Returns:
             The pixel coordinates of the pose
         """
+        pose = pose/scale
         rank = len(pose.shape)
         if rank == 1:
             out = np.zeros(2)
