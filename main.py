@@ -20,7 +20,6 @@ class MapRenderer():
             return self.base_map
         for i in range(self.path_idx, len(path) - 1, self.line_step):
             self.path_idx = i
-            print("path i", path[i])
             cv2.line(self.base_map, tuple(path[i].astype(np.int64)), tuple(path[i+1].astype(np.int64)), (0, 0, 255), 4)
 
         
@@ -53,7 +52,7 @@ class MoBot():
     MOTOR1_GAIN = 1
     MOTOR2_GAIN = -1
 
-    PWM_LIM = [-0.1, 0.3]
+    PWM_LIM = [-0.5, 0.5]
 
     goal_x = 0
     goal_y = 0
@@ -143,27 +142,45 @@ class MoBot():
     def set_motor_pwms(self, pwms):     
         pwms = np.array(pwms)
 
-        diff = pwms[0] - pwms[1]
+        avg = (pwms[0] + pwms[1]) / 2
 
-        # #1 proprity is to keep the diff the same, if possible. If not, scale it down
-        if np.abs(diff) > self.PWM_LIM[1] - self.PWM_LIM[0]:
-            if diff > 0:
-                pwms[0] = self.PWM_LIM[1]
-                pwms[1] = self.PWM_LIM[0]
-            else:
-                pwms[0] = self.PWM_LIM[0]
-                pwms[1] = self.PWM_LIM[1]
-        elif max(pwms) > self.PWM_LIM[1]:
-            # move the pwms linearly to make them fit.
-            pwms = pwms -(max(pwms) - self.PWM_LIM[1])
-        elif min(pwms) < self.PWM_LIM[0]:
-            pwms = pwms + (self.PWM_LIM[0] - min(pwms))
+        # key is to keep the average speed the same, and adjust the difference
+
+        if avg < self.PWM_LIM[0]:
+            pwms[0] = self.PWM_LIM[0]
+            pwms[1] = self.PWM_LIM[0]
+        elif avg > self.PWM_LIM[1]:
+            pwms[0] = self.PWM_LIM[1]
+            pwms[1] = self.PWM_LIM[1]
+        else:
+            # adjust the pwm values to be within the limits, while keeping the average the same
+            if pwms[0] < self.PWM_LIM[0]:
+                diff = self.PWM_LIM[0] - pwms[0]
+                pwms[0] += diff
+                pwms[1] -= diff
+            elif pwms[0] > self.PWM_LIM[1]:
+                diff = pwms[0] - self.PWM_LIM[1]
+                pwms[0] -= diff
+                pwms[1] += diff
+            if pwms[1] < self.PWM_LIM[0]:
+                diff = self.PWM_LIM[0] - pwms[1]
+                pwms[1] += diff
+                pwms[0] -= diff
+            elif pwms[1] > self.PWM_LIM[1]:
+                diff = pwms[1] - self.PWM_LIM[1]
+                pwms[1] -= diff
+                pwms[0] += diff
+
+            # assert np.mean(pwms) == avg, f"average pwm {np.mean(pwms)} not equal to {avg}"
+            # assert np.all(pwms >= self.PWM_LIM[0]), f"pwm {pwms} not within limits {self.PWM_LIM[0]}"
+            # assert np.all(pwms <= self.PWM_LIM[1]), f"pwm {pwms} not within limits {self.PWM_LIM[1]}"
 
         pwm1 = pwms[0]*self.MOTOR1_GAIN
         pwm2 = pwms[1]*self.MOTOR2_GAIN
 
         self._set_motor(self.ENA1, self.IN1_A, self.IN1_B, pwm1)
         self._set_motor(self.ENA2, self.IN2_A, self.IN2_B, pwm2)
+
 
     def _set_motor(self, ena, in_a, in_b, pwm_val):
         duty_cycle = abs(pwm_val) * 100.0
@@ -269,13 +286,13 @@ class MoBot():
             print('reached end of path')
             self.set_motor_pwms((0, 0))
             return
-        GOAL_SPEED = 2 # m/s
-        LOOK_AHEAD = 1 # m
-        DEVIATION_THRESH = 0.15 # m - the relative importance of moving back to the line. W_LOOK = min(distance_from_line / DEVIATION_THRESH, 1)
+        GOAL_SPEED = 1 # m/s
+        LOOK_AHEAD = 2 # m
+        DEVIATION_THRESH = 0.5 # m - the relative importance of moving back to the line. W_LOOK = min(distance_from_line / DEVIATION_THRESH, 1)
 
-        KP_ANGLE = 0.2
+        KP_ANGLE = 0.25
         KI_ANGLE = 0
-        KD_ANGLE = 0.025
+        KD_ANGLE = 0.01
 
         KP_SPEED = 0.5
         KI_SPEED = 0
@@ -291,6 +308,9 @@ class MoBot():
         total_distance = avg_encoder * self.TICK_DIST
 
         speed = (total_distance - self._last_tot_dist) / dt
+
+        if self.verbose:
+            print('speed:', speed)
         self._last_tot_dist = total_distance
         speed = np.clip(speed, 0, 10) # clip the speed to 10 m/s. It should not be more than that
 
@@ -388,6 +408,8 @@ def test_simple_path():
     # load path from csv "simple_path.csv", in the form x,y,t
     path = np.loadtxt("map_processing/race_points.csv", delimiter=",", skiprows=1)
 
+    path = path*np.array([1, 0.65])
+
     save_dir = "data/run_images"
     n = 0
     # find a non-existing directory
@@ -408,7 +430,7 @@ def test_simple_path():
             break
 
     input("press enter to start")
-    mobot = MoBot(chip=chip, verbose=True)
+    mobot = MoBot(chip=chip, verbose=False)
     mobot.set_path(path)   
     time.sleep(0.5)
 
@@ -451,9 +473,9 @@ def test_simple_path():
                     print(f"image_pose: {image_pose}")
                 
                 # update the mobot pose
-                mobot.x += delta_pose[0]*0.1
-                mobot.y += delta_pose[1]*0.1
-                mobot.theta += delta_pose[2]*np.pi/180*0.25
+                mobot.x += delta_pose[0]*0
+                mobot.y += delta_pose[1]*0
+                mobot.theta += delta_pose[2]*np.pi/180*0
 
                 # create the server image:
                 sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
