@@ -464,8 +464,8 @@ def test_simple_path():
                 right_pwm = 0.9 * right_pwm + 0.1 * base_speed
             
             # Ensure PWM values are within limits
-            left_pwm = np.clip(left_pwm, -0.5, 0.5)
-            right_pwm = np.clip(right_pwm, -0.5, 0.5)
+            left_pwm = np.clip(left_pwm, -0.3, 0.3)
+            right_pwm = np.clip(right_pwm, -0.3, 0.3)
             
             # Apply the motor values
             mobot.set_motor_pwms((left_pwm, right_pwm))
