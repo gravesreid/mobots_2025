@@ -137,8 +137,8 @@ def main():
             
             # Add angle information
             if found_line:
-                angle_text = f"Line Angle: {center_angle:.2f}°"
-                cv2.putText(combined, angle_text, (10, height), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 200), 2)
+                angle_text = f"Line Angle: {center_angle:.2f}"
+                cv2.putText(combined, angle_text, (10, height - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 200), 2)
                 
                 # Add steering direction indicator
                 if center_angle > 0:
