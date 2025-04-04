@@ -212,68 +212,68 @@ class MoBot():
         if not self.stoped:
             self.stop()
 
-    # def set_goal(self, x:float, y:float, theta:float):
-    #     self.goal_x = x
-    #     self.goal_y = y
-    #     self.goal_theta = theta
-    #     self.closed_loop_control()
-        # self.follow_path_control()
+    def set_goal(self, x:float, y:float, theta:float):
+        self.goal_x = x
+        self.goal_y = y
+        self.goal_theta = theta
+        self.closed_loop_control()
+        self.follow_path_control()
 
-    # def closed_loop_control(self):
-    #     # PID coefficients
-    #     Kp_theta = 0.1
-    #     Ki_theta = 0
-    #     Kd_theta = 0.01
+    def closed_loop_control(self):
+        # PID coefficients
+        Kp_theta = 0.1
+        Ki_theta = 0
+        Kd_theta = 0.01
 
-    #     Kp_dist = 0.25
-    #     Ki_dist = 0
-    #     Kd_dist = 0
+        Kp_dist = 0.25
+        Ki_dist = 0
+        Kd_dist = 0
 
-    #     goal = np.array([self.goal_x, self.goal_y])
-    #     curr = np.array([self.x, self.y])
-    #     dist_error = np.linalg.norm(goal - curr)
+        goal = np.array([self.goal_x, self.goal_y])
+        curr = np.array([self.x, self.y])
+        dist_error = np.linalg.norm(goal - curr)
 
-    #     # Initialize persistent state if not already done
+        # Initialize persistent state if not already done
 
-    #     # Timing for derivative/integral
-    #     current_time = time.time()
-    #     dt = current_time - self._last_time if current_time != self._last_time else 1e-6
-    #     dt = max(dt, 0.25) # max time step of 0.25s. If its longer, there is probably a problem
+        # Timing for derivative/integral
+        current_time = time.time()
+        dt = current_time - self._last_time if current_time != self._last_time else 1e-6
+        dt = max(dt, 0.25) # max time step of 0.25s. If its longer, there is probably a problem
 
-    #     # Compute heading error
-    #     desired_theta = np.arctan2(goal[1] - curr[1], goal[0] - curr[0])
-    #     theta_error = desired_theta - self.theta
-    #     theta_error = np.arctan2(np.sin(theta_error), np.cos(theta_error)) * min(dist_error, 1.0)
+        # Compute heading error
+        desired_theta = np.arctan2(goal[1] - curr[1], goal[0] - curr[0])
+        theta_error = desired_theta - self.theta
+        theta_error = np.arctan2(np.sin(theta_error), np.cos(theta_error)) * min(dist_error, 1.0)
 
-    #     # PID terms for heading
-    #     self._integral_theta += theta_error * dt
-    #     derivative_theta = (theta_error - self._last_theta_error) / dt
+        # PID terms for heading
+        self._integral_theta += theta_error * dt
+        derivative_theta = (theta_error - self._last_theta_error) / dt
 
-    #     # PID terms for distance
-    #     self._integral_dist += dist_error * dt
-    #     derivative_dist = (dist_error - self._last_dist_error) / dt
+        # PID terms for distance
+        self._integral_dist += dist_error * dt
+        derivative_dist = (dist_error - self._last_dist_error) / dt
 
-    #     # Compute PWM signals
-    #     theta_term = (
-    #         Kp_theta * theta_error +
-    #         Ki_theta * self._integral_theta +
-    #         Kd_theta * derivative_theta
-    #     )
-    #     dist_term = (
-    #         Kp_dist * dist_error +
-    #         Ki_dist * self._integral_dist +
-    #         Kd_dist * derivative_dist
-    #     )
+        # Compute PWM signals
+        theta_term = (
+            Kp_theta * theta_error +
+            Ki_theta * self._integral_theta +
+            Kd_theta * derivative_theta
+        )
+        dist_term = (
+            Kp_dist * dist_error +
+            Ki_dist * self._integral_dist +
+            Kd_dist * derivative_dist
+        )
 
-    #     pwm1 = theta_term + dist_term
-    #     pwm2 = -theta_term + dist_term
+        pwm1 = theta_term + dist_term
+        pwm2 = -theta_term + dist_term
 
-    #     # Update memory
-    #     self._last_theta_error = theta_error
-    #     self._last_dist_error = dist_error
-    #     self._last_time = current_time
+        # Update memory
+        self._last_theta_error = theta_error
+        self._last_dist_error = dist_error
+        self._last_time = current_time
 
-    #     self.set_motor_pwms((pwm1, pwm2))
+        self.set_motor_pwms((pwm1, pwm2))
 
     def set_path(self, path:np.ndarray):
         self.path = path
@@ -632,6 +632,14 @@ class CenterLineDetector():
 import matplotlib.pyplot as plt
 from optimze import MobotLocator
 from scipy.interpolate import CubicSpline
+from image_thresh import thresh_image
+
+MULT = []
+for i in range(480):
+    for j in range(270):
+        MULT.append([i, j])
+
+MULT = np.array(MULT)
 
 def test_simple_path():
     chip = lgpio.gpiochip_open(4)
@@ -688,6 +696,24 @@ def test_simple_path():
             frame_small = cv2.resize(frame, (480, 270))
 
             line_points, line_image = detector.process_image(frame_small) # returns the line points in the image
+            mask = thresh_image(frame_small)
+            mask = mask.astype(np.float64)
+            avg_pix = MULT*mask/np.sum(mask)
+
+            avg_pix = avg_pix*CALIB_IMAGE_SIZE[0]/480.0
+
+            vec_point = pixel_to_world((avg_pix[0], avg_pix[1]), TRANSFORM)
+
+            # rotate and translate the point to the mobot's position
+            theta = image_pose[2]*np.pi/180
+            rotation_matrix = np.array([
+                [np.cos(theta), -np.sin(theta)],
+                [np.sin(theta), np.cos(theta)]
+            ])
+
+            rotated_vec = vec_point@rotation_matrix.T
+            goal_pos = rotated_vec + image_pose[:2]
+            mobot.set_goal(goal_pos[0], goal_pos[1])
             # two points [[x1, y1], [x2, y2]] - start and end of the line. In CV2 coordinate frame
             
             # use warp to convert the line points to the map coordinates:
