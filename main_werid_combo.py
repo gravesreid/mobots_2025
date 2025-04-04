@@ -212,72 +212,72 @@ class MoBot():
         if not self.stoped:
             self.stop()
 
-    def set_goal(self, x:float, y:float, theta:float):
-        self.goal_x = x
-        self.goal_y = y
-        self.goal_theta = theta
-        self.closed_loop_control()
-        self.follow_path_control()
+    # def set_goal(self, x:float, y:float, theta:float):
+    #     self.goal_x = x
+    #     self.goal_y = y
+    #     self.goal_theta = theta
+    #     self.closed_loop_control()
+    #     self.follow_path_control()
 
-    def closed_loop_control(self):
-        # PID coefficients
-        Kp_theta = 0.1
-        Ki_theta = 0
-        Kd_theta = 0.01
+    # def closed_loop_control(self):
+    #     # PID coefficients
+    #     Kp_theta = 0.1
+    #     Ki_theta = 0
+    #     Kd_theta = 0.01
 
-        Kp_dist = 0.25
-        Ki_dist = 0
-        Kd_dist = 0
+    #     Kp_dist = 0.25
+    #     Ki_dist = 0
+    #     Kd_dist = 0
 
-        goal = np.array([self.goal_x, self.goal_y])
-        curr = np.array([self.x, self.y])
-        dist_error = np.linalg.norm(goal - curr)
+    #     goal = np.array([self.goal_x, self.goal_y])
+    #     curr = np.array([self.x, self.y])
+    #     dist_error = np.linalg.norm(goal - curr)
 
-        # Initialize persistent state if not already done
+    #     # Initialize persistent state if not already done
 
-        # Timing for derivative/integral
-        current_time = time.time()
-        dt = current_time - self._last_time if current_time != self._last_time else 1e-6
-        dt = max(dt, 0.25) # max time step of 0.25s. If its longer, there is probably a problem
+    #     # Timing for derivative/integral
+    #     current_time = time.time()
+    #     dt = current_time - self._last_time if current_time != self._last_time else 1e-6
+    #     dt = max(dt, 0.25) # max time step of 0.25s. If its longer, there is probably a problem
 
-        # Compute heading error
-        desired_theta = np.arctan2(goal[1] - curr[1], goal[0] - curr[0])
-        theta_error = desired_theta - self.theta
-        theta_error = np.arctan2(np.sin(theta_error), np.cos(theta_error)) * min(dist_error, 1.0)
+    #     # Compute heading error
+    #     desired_theta = np.arctan2(goal[1] - curr[1], goal[0] - curr[0])
+    #     theta_error = desired_theta - self.theta
+    #     theta_error = np.arctan2(np.sin(theta_error), np.cos(theta_error)) * min(dist_error, 1.0)
 
-        # PID terms for heading
-        self._integral_theta += theta_error * dt
-        derivative_theta = (theta_error - self._last_theta_error) / dt
+    #     # PID terms for heading
+    #     self._integral_theta += theta_error * dt
+    #     derivative_theta = (theta_error - self._last_theta_error) / dt
 
-        # PID terms for distance
-        self._integral_dist += dist_error * dt
-        derivative_dist = (dist_error - self._last_dist_error) / dt
+    #     # PID terms for distance
+    #     self._integral_dist += dist_error * dt
+    #     derivative_dist = (dist_error - self._last_dist_error) / dt
 
-        # Compute PWM signals
-        theta_term = (
-            Kp_theta * theta_error +
-            Ki_theta * self._integral_theta +
-            Kd_theta * derivative_theta
-        )
-        dist_term = (
-            Kp_dist * dist_error +
-            Ki_dist * self._integral_dist +
-            Kd_dist * derivative_dist
-        )
+    #     # Compute PWM signals
+    #     theta_term = (
+    #         Kp_theta * theta_error +
+    #         Ki_theta * self._integral_theta +
+    #         Kd_theta * derivative_theta
+    #     )
+    #     dist_term = (
+    #         Kp_dist * dist_error +
+    #         Ki_dist * self._integral_dist +
+    #         Kd_dist * derivative_dist
+    #     )
 
-        pwm1 = theta_term + dist_term
-        pwm2 = -theta_term + dist_term
+    #     pwm1 = theta_term + dist_term
+    #     pwm2 = -theta_term + dist_term
 
-        # Update memory
-        self._last_theta_error = theta_error
-        self._last_dist_error = dist_error
-        self._last_time = current_time
+    #     # Update memory
+    #     self._last_theta_error = theta_error
+    #     self._last_dist_error = dist_error
+    #     self._last_time = current_time
 
-        self.set_motor_pwms((pwm1, pwm2))
+    #     self.set_motor_pwms((pwm1, pwm2))
 
     def set_path(self, path:np.ndarray):
         self.path_idx = 0
-        self.path = path
+        self.path = np.array(path).copy()
         self.last_time = time.time()
         self.follow_path_control()
 
@@ -288,10 +288,10 @@ class MoBot():
             self.set_motor_pwms((0, 0))
             return
         GOAL_SPEED = 1 # m/s
-        LOOK_AHEAD = 2 # m
-        DEVIATION_THRESH = 0.5 # m - the relative importance of moving back to the line. W_LOOK = min(distance_from_line / DEVIATION_THRESH, 1)
+        LOOK_AHEAD = 0.5 # m
+        DEVIATION_THRESH = 0.25 # m - the relative importance of moving back to the line. W_LOOK = min(distance_from_line / DEVIATION_THRESH, 1)
 
-        KP_ANGLE = 0.25
+        KP_ANGLE = 0.2
         KI_ANGLE = 0
         KD_ANGLE = 0.01
 
@@ -325,52 +325,52 @@ class MoBot():
 
         # only move forward in the path. Check to see if we are closer to the next point
         # if we are, move to the next point
-        while True:
-            if self.path_idx >= len(self.path) - 3:
-                break
-            cur_dist = np.linalg.norm(self.path[self.path_idx] - pos)
-            next_dist = np.linalg.norm(self.path[self.path_idx + 1] - pos)
+        with lock: # lock the path so that it is not being modified while we are using it
+            while True:
+                if self.path_idx >= len(self.path) - 3:
+                    break
+                cur_dist = np.linalg.norm(self.path[self.path_idx] - pos)
+                next_dist = np.linalg.norm(self.path[self.path_idx + 1] - pos)
 
-            if self.path[self.path_idx][0] < pos[0]:
-                # we always move forward (+x direction)
-                self.path_idx += 1
-                continue
+                # if self.path[self.path_idx][0] < pos[0]:
+                #     # we always move forward (+x direction)
+                #     self.path_idx += 1
+                #     continue
 
-            if next_dist < cur_dist:
-                self.path_idx += 1
-            else:  
-                break
+                if next_dist < cur_dist:
+                    self.path_idx += 1
+                else:  
+                    break
+
+            # get the path heading:
+            tangent = self.path[self.path_idx + 1] - self.path[self.path_idx - 1]
+            path_heading = np.arctan2(tangent[1], tangent[0])
+
+            # calculate the distance from the path (perpendicular distance)
+            # the distance is the cross product of the vector from the current point to the robot
+            # and the tangent vector of the path (unit vector)
+
+            dist = np.cross(pos - self.path[self.path_idx], tangent / np.linalg.norm(tangent))
+            
+
+            self._integral_dist += dist * dt
+            self._integral_dist = np.clip(self._integral_dist, -10, 10)
+
+            # find the point on the path that is LOOK_AHEAD away
+            look_dist = 0
+            look_idx = self.path_idx
+            while look_dist < LOOK_AHEAD:
+                look_idx += 1
+                if look_idx >= len(self.path) - 1:
+                    break
+                look_dist += np.linalg.norm(self.path[look_idx] - self.path[look_idx - 1])
+            
+            # get look_heading:
+            look_vec = self.path[look_idx] - pos
 
         if self.verbose:
             print('path idx:', self.path_idx)
-
-        # get the path heading:
-        tangent = self.path[self.path_idx + 1] - self.path[self.path_idx - 1]
-        path_heading = np.arctan2(tangent[1], tangent[0])
-
-        # calculate the distance from the path (perpendicular distance)
-        # the distance is the cross product of the vector from the current point to the robot
-        # and the tangent vector of the path (unit vector)
-
-        dist = np.cross(pos - self.path[self.path_idx], tangent / np.linalg.norm(tangent))
-        
-
-        self._integral_dist += dist * dt
-        self._integral_dist = np.clip(self._integral_dist, -10, 10)
-        if self.verbose:
             print('dist:', dist)
-
-        # find the point on the path that is LOOK_AHEAD away
-        look_dist = 0
-        look_idx = self.path_idx
-        while look_dist < LOOK_AHEAD:
-            look_idx += 1
-            if look_idx >= len(self.path) - 1:
-                break
-            look_dist += np.linalg.norm(self.path[look_idx] - self.path[look_idx - 1])
-        
-        # get look_heading:
-        look_vec = self.path[look_idx] - pos
         look_heading = np.arctan2(look_vec[1], look_vec[0])
 
         w_look = min(np.abs(dist) / DEVIATION_THRESH, 1)
@@ -601,7 +601,7 @@ class CenterLineDetector():
             print(f"Error fitting line: {e}")
             return result_img, None, None, None
     
-    def process_image(self, img):
+    def process_image(self, mask, img):
         """
         Process an image and visualize the robot on the map.
         
@@ -611,58 +611,13 @@ class CenterLineDetector():
             robot_y: Current robot y position (meters)
             robot_angle: Current robot heading angle (degrees)
         """
-
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            
-        # Apply median blur
-        blurred = cv2.medianBlur(gray, 7)
-        
-        # Apply different levels of blurring
-        very_blurred = cv2.medianBlur(blurred, 21)
-        very_very_blurred = cv2.medianBlur(blurred, 251)
-        
-        # Take minimum of blurred images
-        combo = cv2.min(very_blurred, very_very_blurred)
-        very_blurred = combo
-        
-        # Compute normalized difference
-        diff = np.float32(blurred)/np.float32(very_blurred)
-        diff = np.uint8(cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX))
-        
-        # Apply Otsu thresholding
-        _, mask = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # Apply morphological closing
-        kernel_size = 3
-        kernel = np.ones((kernel_size, kernel_size), np.uint8)
-        closed_mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-        
-        # Keep largest contiguous area
-        # Find all contiguous regions
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(closed_mask, connectivity=8)
-        
-        # Find the largest component by area (excluding background at index 0)
-        largest_mask = np.zeros_like(closed_mask)
-        
-        if num_labels > 1:
-            largest_label = 1
-            largest_area = stats[1, cv2.CC_STAT_AREA]
-            
-            for i in range(2, num_labels):
-                area = stats[i, cv2.CC_STAT_AREA]
-                if area > largest_area:
-                    largest_area = area
-                    largest_label = i
-            
-            # Create a new mask containing only the largest component
-            largest_mask[labels == largest_label] = 255
         
         # ---------- Prepare visualization of original and mask only ----------
         # Convert mask to BGR for display
     
         
         # Draw outline curves
-        outlined_image, left_curve, right_curve = self.draw_outline_curves(largest_mask, img)
+        outlined_image, left_curve, right_curve = self.draw_outline_curves(mask, img)
         
         # Create and draw center line
         center_line_image, center_line_top, center_line_bottom, center_line_angle = self.create_center_line(left_curve, right_curve, outlined_image)
@@ -716,7 +671,8 @@ def test_simple_path():
     time.sleep(0.5)
 
     map_renderer = MapRenderer("/home/pi/mobots_2025/map_processing/final_path.png")
-    locator = MobotLocator(max_detlas=np.array([0.5, 0.5]), step_size=np.array([0.1, 0.1]), dist_penalty=0.2, debug_print=False)
+    locator = MobotLocator(max_detlas=np.array([0.1, 0.1, 5]), step_size=np.array([0.01, 0.1, 0.1]), dist_penalty=0.4, debug_print=False)
+    locator_delta = np.array([0, 0, 0])
     detector = CenterLineDetector()
     try:
         # Initialize frame counter for statistics
@@ -737,8 +693,12 @@ def test_simple_path():
 
             frame_small = cv2.resize(frame, (480, 270))
 
-            line_points, line_image = detector.process_image(frame_small) # returns the line points in the image
             mask = thresh_image(frame_small)
+
+            if np.mean(mask) > 0.2*255:
+                print('no line detected')
+                continue
+    
             mask = mask.astype(np.float64)
             avg_pix = MULT*mask/np.sum(mask)
 
@@ -755,91 +715,122 @@ def test_simple_path():
 
             rotated_vec = vec_point@rotation_matrix.T
             goal_pos = rotated_vec + image_pose[:2]
-            mobot.set_goal(goal_pos[0], goal_pos[1])
-            # two points [[x1, y1], [x2, y2]] - start and end of the line. In CV2 coordinate frame
-            
-            # use warp to convert the line points to the map coordinates:
 
-            if line_points[0] is None:
-                continue
-
-            scale = CALIB_IMAGE_SIZE[0]/480.0
-            line_points = np.array(line_points)*scale
-
-            # convert the line points to world coordinates:
-            line_points_world = np.array([pixel_to_world((x, y), TRANSFORM) for x, y in line_points])
-
-            # Set current location
-            current_location = np.array([0.0, 0.0])
-
-            # Calculate line midpoint
-            line_midpoint = (line_points_world[0] + line_points_world[1]) / 2
-            line_endpoint = line_points_world[1]
-
-            # Calculate line direction
-            line_direction = line_points_world[1] - line_points_world[0]
-            line_direction_normalized = line_direction / np.linalg.norm(line_direction)
-
-            # PART 1: Fit spline from current location to line endpoint
-            # Control points for the spline
-            spline_control_points = np.vstack([
-                current_location,
-                line_midpoint,
-                line_endpoint
-            ])
-
-            # Create parameter values for spline (using cumulative distance)
-            t = np.zeros(len(spline_control_points))
-            for i in range(1, len(spline_control_points)):
-                t[i] = t[i-1] + np.linalg.norm(spline_control_points[i] - spline_control_points[i-1])
-            t = t / t[-1]  # Normalize to [0,1]
-
-            # Fit the spline
-            spline_x = CubicSpline(t, spline_control_points[:, 0])
-            spline_y = CubicSpline(t, spline_control_points[:, 1])
-
-            # Generate points along the spline
-            num_spline_points = 30
-            t_values = np.linspace(0, 1, num_spline_points)
-            spline_points = np.column_stack((spline_x(t_values), spline_y(t_values)))
-
-            # PART 2: Create straight extension from line endpoint
-            extension_distance = 2.0  # Distance to extend beyond line endpoint
-            num_extension_points = 30
-
-            # Generate points along the straight extension
-            extension_t = np.linspace(0, 1, num_extension_points)
-            extension_points = np.array([
-                line_endpoint + t * extension_distance * line_direction_normalized
-                for t in extension_t
-            ])
-
-            delta_path = np.vstack((spline_points, extension_points))
-
-            # apply the mobots rotation and position to the delta_path:
-            # rotate the path by the mobots theta
-            theta = image_pose[2]*np.pi/180
-            rotation_matrix = np.array([
-                [np.cos(theta), -np.sin(theta)],
-                [np.sin(theta), np.cos(theta)]
-            ])
-            # rotate the path
-            rotated_path = delta_path @ rotation_matrix.T
-
-            # translate the path to the mobots position
-            new_path = rotated_path + np.array([image_pose[0], image_pose[1]])
-
-            
-            # update the mobot pose
-            mobot.set_path(new_path)
-
-            # create the server image:
-            # sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
-            sim_image = np.zeros([270, 480, 3])
-            sim_image[:, :, :] = line_image 
-                        
             mobot_path_pix = locator.pose_to_pixel(mobot_path)
             map_render = map_renderer.plot_path(mobot_path_pix, image_pose[2]*np.pi/180)
+
+            mode = "spline"
+            if mode == "spline":
+                # two points [[x1, y1], [x2, y2]] - start and end of the line. In CV2 coordinate frame
+                line_points, line_image = detector.process_image(mask, mask) # returns the line points in the image
+                # use warp to convert the line points to the map coordinates:
+                if line_points[0] is None:
+                    # use theta as the theta of rotated vec:
+                    end_theta = np.arctan2(rotated_vec[1], rotated_vec[0])
+                
+                else:
+                    scale = CALIB_IMAGE_SIZE[0]/480.0
+                    line_points = np.array(line_points)*scale
+
+                    # convert the line points to world coordinates:
+                    line_points_world = np.array([pixel_to_world((x, y), TRANSFORM) for x, y in line_points])
+
+                    line_points_world = line_points_world @ rotation_matrix.T
+
+                    # get the angle of the line
+                    end_theta = np.arctan2(line_points_world[1][1] - line_points_world[0][1], line_points_world[1][0] - line_points_world[0][0])
+
+
+                # PART 1: Fit spline from current location to line endpoint
+                # Control points for the spline
+
+                mid_point = goal_pos - np.array([np.cos(end_theta), np.sin(end_theta)])*0.5*np.linalg.norm(goal_pos - image_pose[:2])
+                spline_control_points = np.vstack([
+                    image_pose[:2],  # Current position
+                    mid_point,
+                    goal_pos,
+                ])
+
+                # Create parameter values for spline (using cumulative distance)
+                t = np.zeros(len(spline_control_points))
+                for i in range(1, len(spline_control_points)):
+                    t[i] = t[i-1] + np.linalg.norm(spline_control_points[i] - spline_control_points[i-1])
+                t = t / t[-1]  # Normalize to [0,1]
+
+                # Fit the spline
+                spline_x = CubicSpline(t, spline_control_points[:, 0])
+                spline_y = CubicSpline(t, spline_control_points[:, 1])
+
+                # Generate points along the spline
+                num_spline_points = 30
+                t_values = np.linspace(0, 1, num_spline_points)
+                spline_points = np.column_stack((spline_x(t_values), spline_y(t_values)))
+
+                # PART 2: Create straight extension from line endpoint
+                extension_distance = 4.0  # Distance to extend beyond line endpoint
+                num_extension_points = 30
+
+                # Generate points along the straight extension
+                extension_t = np.linspace(0, extension_distance, num_extension_points)
+                extension_points = np.array([
+                    goal_pos + t * np.array([np.cos(end_theta), np.sin(end_theta)])
+                    for t in extension_t
+                ])
+
+                new_path = np.vstack((spline_points, extension_points))
+                
+                # update the mobot pose
+                mobot.set_path(new_path)
+
+                # create the server image:
+                # sim_image = locator.render_sim_image(pose=image_pose+delta_pose, cam_image=cam_mask)
+                sim_image = np.zeros([270, 480, 3])
+                sim_image[:, :, :] = line_image 
+
+                # render the new path on the map
+                new_path_pix = locator.pose_to_pixel(new_path)
+                for i in range(len(new_path_pix)-1):
+                    cv2.line(map_render, tuple(new_path_pix[i]), tuple(new_path_pix[i+1]), (255, 0, 0), 2)
+            
+            elif mode == "line":
+                # Create a straight line from the current position to the goal position
+                # Then also extend 4 meters in the direction of the goal position
+                dist = np.linalg.norm(goal_pos - image_pose[:2])
+                unit_vec = (goal_pos - image_pose[:2]) / dist
+                total_dist = dist + 4.0
+                num_points = 60
+                new_path = np.array([
+                    image_pose[:2] + i * unit_vec * (total_dist / num_points)
+                    for i in range(num_points)
+                ])
+
+                # update the mobot pose
+                mobot.set_path(new_path)
+
+                sim_image = np.zeros([270, 480, 3])
+                sim_image[:, :, 2] = mask
+
+                # render the new path on the map
+                new_path_pix = locator.pose_to_pixel(new_path)
+                for i in range(len(new_path_pix)-1):
+                    cv2.line(map_render, tuple(new_path_pix[i]), tuple(new_path_pix[i+1]), (255, 0, 0), 2)
+
+            run_locator = False
+            if run_locator:
+                # run the locator
+                delta_pose = locator.locate_image(mask, 
+                                                  x = image_pose[0] + locator_delta[0],
+                                                  y = image_pose[1] + locator_delta[1],
+                                                  theta = image_pose[2] + locator_delta[2],)
+                # update the locator delta
+                locator_delta += delta_pose*np.array([0.25, 0.25, 0.25])
+
+                # add a circle to the image at the locator position
+                locator_pose = np.array([image_pose[0] + delta_pose[0], image_pose[1] + delta_pose[1]])
+                loc_pose_pix = locator.pose_to_pixel(locator_pose)
+
+                cv2.circle(map_render, (int(loc_pose_pix[0]), int(loc_pose_pix[1])), 10, (0, 255, 0), -1)
+
             
             server_image = np.zeros([270*2, 480*2, 3])
             server_image[:270, :480] = cv2.resize(frame, (480, 270))

@@ -69,7 +69,7 @@ class MobotLocator:
 
         last_cos_sim = calculate_cos_sim(pose, cam_image, self.map, out_scale, self.CALIB_IMAGE_SIZE, self.CALIBRATION_PIXELS, self.CALIBRATION_LOCS, sum_cam)
         
-        for _ in range(20):
+        for _ in range(10):
             if last_cos_sim == 0:
                 # pick a random pose in the search space:
                 for i in range(3):
@@ -84,7 +84,7 @@ class MobotLocator:
                 print("No pose found")
             return 0, 0, 0
         
-        t_max = 25
+        t_max = 10
         for t in range(t_max):
             test_poses = []
             dist_penalties = np.zeros(3)

@@ -288,8 +288,8 @@ class MoBot():
             self.set_motor_pwms((0, 0))
             return
         GOAL_SPEED = 1 # m/s
-        LOOK_AHEAD = 2 # m
-        DEVIATION_THRESH = 0.5 # m - the relative importance of moving back to the line. W_LOOK = min(distance_from_line / DEVIATION_THRESH, 1)
+        LOOK_AHEAD = 0.5 # m
+        DEVIATION_THRESH = 0.33 # m - the relative importance of moving back to the line. W_LOOK = min(distance_from_line / DEVIATION_THRESH, 1)
 
         KP_ANGLE = 0.25
         KI_ANGLE = 0
