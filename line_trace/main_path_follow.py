@@ -438,36 +438,34 @@ def test_simple_path():
                 # Negative angle means the line is to the left (need to turn left)
                 error = angle
                 
-                # PID control
+                # PID control for smoothing the angle response
                 error_integral += error * dt
                 error_integral = np.clip(error_integral, -1.0, 1.0)  # Anti-windup
                 
                 error_derivative = (error - last_error) / dt if dt > 0 else 0
                 last_error = error
                 
-                # Calculate steering command using PID
-                steering = k_p * error + k_i * error_integral + k_d * error_derivative
+                # Calculate smoothed angle using PID
+                smoothed_angle = error + k_i * error_integral + k_d * error_derivative
                 
-                # Apply steering to motor commands
-                left_pwm = base_speed - steering
-                right_pwm = base_speed + steering
+                # Calculate wheel speeds directly based on the angle
+                left_pwm, right_pwm = calculate_wheel_speeds(smoothed_angle)
                 
                 # Remember last valid angle
                 last_angle = angle
                 
-                print(f"Line found! Angle: {angle:.2f}°, Steering: {steering:.2f}")
+                print(f"Line found! Angle: {angle:.2f}, L: {left_pwm:.2f}, R: {right_pwm:.2f}")
             else:
                 print("No line found. Continuing on previous path")
-                # Gradually reduce the differential to go straighter
-                # Robot should go straight when no line is found
-                left_pwm = 0.9 * left_pwm + 0.1 * base_speed
-                right_pwm = 0.9 * right_pwm + 0.1 * base_speed
+                # Gradually reduce the differential to go straighter when no line is found
+                # Calculate speeds for a slight turn based on last known angle
+                # This helps the robot continue searching in the last known direction
+                reduced_angle = last_angle * 0.5  # Reduce the angle to make a gentler turn
+                left_pwm, right_pwm = calculate_wheel_speeds(reduced_angle)
+                
+                print(f"No line - using last angle: {reduced_angle:.2f}°")
             
-            # Ensure PWM values are within limits
-            left_pwm = np.clip(left_pwm, -0.3, 0.3)
-            right_pwm = np.clip(right_pwm, -0.3, 0.3)
-            
-            # Apply the motor values
+            # Apply the motor values (speeds are already clipped in calculate_wheel_speeds)
             mobot.set_motor_pwms((left_pwm, right_pwm))
             
             # Print current motor values for debugging
@@ -482,6 +480,47 @@ def test_simple_path():
         # Clean up
         mobot.stop()
         print("Resources released")
+
+def calculate_wheel_speeds(angle):
+    """
+    Calculate differential wheel speeds based on center line angle.
+    
+    Args:
+        angle: Center line angle in degrees (-90 to 90)
+               Negative = line is to the left
+               Positive = line is to the right
+    
+    Returns:
+        Tuple of (left_speed, right_speed) where:
+        - When angle is negative (turning left): left wheel faster
+        - When angle is positive (turning right): right wheel faster
+    """
+    # Clip angle to -90 to 90 degrees
+    angle = np.clip(angle, -90, 90)
+    
+    # Base speed that both wheels start with
+    base_speed = 0.12
+    
+    # Maximum differential to add/subtract (increases with angle magnitude)
+    max_differential = 0.08
+    
+    # Calculate speed differential based on angle
+    # Scale from 0 (at angle=0) to max_differential (at angle=±90)
+    differential = abs(angle) / 90.0 * max_differential
+    
+    # Set wheel speeds based on turn direction
+    if angle < 0:  # Turn left - left wheel faster
+        left_speed = base_speed + differential
+        right_speed = base_speed - differential
+    else:  # Turn right or straight - right wheel faster for right turns
+        left_speed = base_speed - differential
+        right_speed = base_speed + differential
+    
+    # Ensure minimum speed and maximum speed
+    left_speed = np.clip(left_speed, 0.05, 0.2)
+    right_speed = np.clip(right_speed, 0.05, 0.2)
+    
+    return left_speed, right_speed
 
 if __name__ == "__main__":
     # encoder_test(17)

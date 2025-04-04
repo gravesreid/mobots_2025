@@ -127,7 +127,7 @@ class Control:
         
         return img
 
-    def create_center_line(self, left_curve, right_curve, img, start_at_bottom_third=True):
+    def create_center_line(self, left_curve, right_curve, img, start_at_bottom_third=True, max_distance_from_bottom=100):
         """
         Create a straight center line based on the left and right curves.
         
@@ -136,6 +136,7 @@ class Control:
             right_curve: Array of points for right curve
             img: Image to draw on
             start_at_bottom_third: Whether to only use bottom third of the image
+            max_distance_from_bottom: Maximum distance in pixels from the bottom to consider midpoints
             
         Returns:
             Image with center line drawn
@@ -151,7 +152,7 @@ class Control:
         common_y = set(left_dict.keys()).intersection(set(right_dict.keys()))
         
         # For bottom third of the image
-        bottom_third_y = height *  1 // 3
+        bottom_third_y = height * 1 // 3
         if start_at_bottom_third:
             common_y = [y for y in common_y if y >= bottom_third_y]
         
@@ -170,23 +171,37 @@ class Control:
         # Convert to numpy array
         midpoints = np.array(midpoints)
         
-        # Fit a straight line using linear regression
-        x = midpoints[:, 0]
-        y = midpoints[:, 1]
-        
-        # Use polyfit to get the line parameters (degree 1 = straight line)
         try:
-            slope, intercept = np.polyfit(y, x, 1)
-            
-            # Create the line endpoints
-            if start_at_bottom_third:
-                top_y = bottom_third_y
-            else:
-                top_y = 0
+            # Set bottom point to be at the bottom center of the frame
             bottom_y = height - 1
+            bottom_x = width // 2
             
-            top_x = int(slope * top_y + intercept)
-            bottom_x = int(slope * bottom_y + intercept)
+            # Filter midpoints to only use those within max_distance_from_bottom
+            close_midpoints = midpoints[midpoints[:, 1] >= (height - max_distance_from_bottom)]
+            
+            if len(close_midpoints) < 2:
+                # If not enough close points, fallback to using all midpoints
+                close_midpoints = midpoints
+            
+            # Find the furthest midpoint from the bottom (but still within our distance limit)
+            furthest_point = close_midpoints[np.argmin(close_midpoints[:, 1])]  # Lowest y value is furthest up
+            
+            # Calculate the slope of the line connecting bottom center to furthest midpoint
+            dx = furthest_point[0] - bottom_x
+            dy = furthest_point[1] - bottom_y
+            
+            # Avoid division by zero
+            if dy == 0:
+                # Vertical line
+                top_y = bottom_third_y if start_at_bottom_third else 0
+                top_x = bottom_x
+            else:
+                # Calculate slope
+                slope = dx / dy
+                
+                # Calculate the top point
+                top_y = bottom_third_y if start_at_bottom_third else 0
+                top_x = int(bottom_x + slope * (top_y - bottom_y))
             
             # Draw the line
             cv2.line(result_img, (top_x, top_y), (bottom_x, bottom_y), (0, 255, 0), 3)  # Green line
@@ -201,14 +216,10 @@ class Control:
             # Calculate the center line angle
             angle = self.get_center_line_angle(center_line_top, center_line_bottom)
             
-            # # Add angle to the image (optional)
-            # cv2.putText(result_img, f"Angle: {angle:.1f}°", 
-            #             (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            
             return result_img, center_line_top, center_line_bottom, angle
             
         except Exception as e:
-            print(f"Error fitting line: {e}")
+            print(f"Error calculating center line: {e}")
             return result_img, None, None, None
 
     def load_gps_path(self, csv_file="../map_processing/test_points_processed.csv"):
@@ -264,13 +275,19 @@ class Control:
             vision_weight: Weight for vision-based steering (0-1)
             
         Returns:
-            Final steering angle (degrees)
+            Tuple of (steering_angle, left_speed, right_speed)
+            - steering_angle: Final steering angle (degrees)
+            - left_speed: Speed for left wheel (0-0.3)
+            - right_speed: Speed for right wheel (0-0.3)
         """
         # Combine the two angles with weighted average
         gps_weight = 1 - vision_weight
         final_angle = vision_weight * center_line_angle + gps_weight * target_path_angle
         
-        return final_angle
+        # Calculate wheel speeds based on the steering angle
+        left_speed, right_speed = self.calculate_wheel_speeds(final_angle)
+        
+        return final_angle, left_speed, right_speed
 
     def get_center_line_angle(self, top_point, bottom_point):
         """
@@ -281,13 +298,18 @@ class Control:
             bottom_point: (x, y) coordinates of the bottom of the line
             
         Returns:
-            Angle in degrees
+            Angle in degrees where:
+            0 = vertical (straight up)
+            +90 = right
+            -90 = left
         """
         dx = top_point[0] - bottom_point[0]
         dy = top_point[1] - bottom_point[1]
         
-        # Calculate angle in degrees (0 is vertical, positive is right, negative is left)
-        angle = np.arctan2(dx, dy) * 180 / np.pi
+        # Calculate angle in degrees
+        # arctan2 returns angle in radians in range [-π, π]
+        # We adjust so vertical is 0, right is +90, left is -90
+        angle = np.arctan2(dx, -dy) * 180 / np.pi
         
         return angle
 
@@ -409,7 +431,7 @@ class Control:
     def visualize_center_line_on_map(self, image_path, robot_x, robot_y, robot_angle,
                                    map_path="../map_processing/final_path.png",
                                    pixel_size=0.03, origin_pixel=(2418.8, 175.3),
-                                   show_path_points=3, look_ahead=20, vision_weight=0.6):
+                                   show_path_points=3, look_ahead=5, vision_weight=0.6):
         """
         Visualize the center line from the camera image on the map alongside robot position.
         
@@ -562,8 +584,8 @@ class Control:
         
         # Calculate and draw the steering direction if both angles are available
         if vision_center_line_angle is not None and look_ahead_path_angle is not None:
-            # Calculate steering angle using determine_steering_command
-            steering_angle = self.determine_steering_command(
+            # Calculate steering angle and wheel speeds using determine_steering_command
+            steering_angle, left_speed, right_speed = self.determine_steering_command(
                 vision_center_line_angle, 
                 look_ahead_path_angle, 
                 vision_weight=vision_weight
@@ -587,11 +609,16 @@ class Control:
                         (int(steering_end_x) + 5, int(steering_end_y) + 5), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
             
-            # Add more detailed angle information at the bottom of the image
-            angle_info = f"Vision: {vision_center_line_angle:.1f}  Path: {look_ahead_path_angle:.1f}  Steering: {steering_angle:.1f}"
+            # Add more detailed information at the bottom of the image
+            angle_info = f"Vision: {vision_center_line_angle:.1f}°  Path: {look_ahead_path_angle:.1f}°  Steering: {steering_angle:.1f}°"
+            speed_info = f"Left wheel: {left_speed:.2f}  Right wheel: {right_speed:.2f}"
             map_height = result_img.shape[0]
+            
             cv2.putText(result_img, angle_info, 
                         (10, map_height - 90), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 100, 255), 2)
+            cv2.putText(result_img, speed_info, 
+                        (10, map_height - 60), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 100, 255), 2)
         
         # Create a combined visualization
@@ -626,6 +653,41 @@ class Control:
         
         return composite_img
 
+    def calculate_wheel_speeds(self, steering_angle):
+        """
+        Convert steering angle to differential wheel speeds.
+        
+        Args:
+            steering_angle: Angle in degrees, range -90 to 90
+                            Negative angles: turn left (left wheel faster)
+                            Positive angles: turn right (right wheel faster)
+        
+        Returns:
+            Tuple of (left_speed, right_speed) in range 0 to 0.3
+        """
+        # Clip the steering angle to -90 to 90 range
+        steering_angle = np.clip(steering_angle, -90, 90)
+        
+        # Base speed - maximum is 0.3
+        base_speed = 0.2
+        
+        # Speed differential based on angle
+        # At angle = 0, both wheels same speed
+        # At extreme angles (±90), one wheel at max, one at min
+        speed_differential = abs(steering_angle) / 90.0 * 0.1  # Scale to max 0.1 difference
+        
+        # Calculate left and right wheel speeds
+        if steering_angle < 0:
+            # Turn left: left wheel faster
+            left_speed = min(base_speed + speed_differential, 0.3)
+            right_speed = max(base_speed - speed_differential, 0.05)
+        else:
+            # Turn right: right wheel faster
+            left_speed = max(base_speed - speed_differential, 0.05)
+            right_speed = min(base_speed + speed_differential, 0.3)
+        
+        return left_speed, right_speed
+
 if __name__ == "__main__":
     control = Control()
     
@@ -636,6 +698,6 @@ if __name__ == "__main__":
         robot_y=-0.75, 
         robot_angle=-40,
         show_path_points=5,
-        look_ahead=20,
+        look_ahead=5,
         vision_weight=0.7
     )
