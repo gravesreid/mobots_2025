@@ -410,7 +410,7 @@ class MoBot():
 
 import matplotlib.pyplot as plt
 from optimze import MobotLocator
-from image_thesh import thresh_image
+from image_thresh import thresh_image
 def test_simple_path():
     chip = lgpio.gpiochip_open(4)
     # load path from csv "simple_path.csv", in the form x,y,t

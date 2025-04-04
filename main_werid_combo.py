@@ -276,8 +276,8 @@ class MoBot():
         self.set_motor_pwms((pwm1, pwm2))
 
     def set_path(self, path:np.ndarray):
-        self.path = path
         self.path_idx = 0
+        self.path = path
         self.last_time = time.time()
         self.follow_path_control()
 
@@ -326,8 +326,7 @@ class MoBot():
         # only move forward in the path. Check to see if we are closer to the next point
         # if we are, move to the next point
         while True:
-            if self.path_idx == len(self.path) - 3:
-                self.path_idx += 1 # move to the last point
+            if self.path_idx >= len(self.path) - 3:
                 break
             cur_dist = np.linalg.norm(self.path[self.path_idx] - pos)
             next_dist = np.linalg.norm(self.path[self.path_idx + 1] - pos)
@@ -542,7 +541,7 @@ class CenterLineDetector():
         common_y = set(left_dict.keys()).intersection(set(right_dict.keys()))
         
         # For bottom third of the image
-        bottom_third_y = height * 2 // 3
+        bottom_third_y = height * 1 // 3
         if start_at_bottom_third:
             common_y = [y for y in common_y if y >= bottom_third_y]
         
@@ -570,10 +569,10 @@ class CenterLineDetector():
             slope, intercept = np.polyfit(y, x, 1)
             
             # Create the line endpoints
-            if start_at_bottom_third:
-                top_y = bottom_third_y
-            else:
-                top_y = 0
+            # if start_at_bottom_third:
+            #     top_y = bottom_third_y
+            # else:
+            top_y = 0
             bottom_y = height - 1
             
             top_x = int(slope * top_y + intercept)
@@ -612,20 +611,63 @@ class CenterLineDetector():
             robot_y: Current robot y position (meters)
             robot_angle: Current robot heading angle (degrees)
         """
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+        # Apply median blur
+        blurred = cv2.medianBlur(gray, 7)
         
-        # Convert to grayscale if not already
-        if len(img.shape) == 3:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = img.copy()
+        # Apply different levels of blurring
+        very_blurred = cv2.medianBlur(blurred, 21)
+        very_very_blurred = cv2.medianBlur(blurred, 251)
+        
+        # Take minimum of blurred images
+        combo = cv2.min(very_blurred, very_very_blurred)
+        very_blurred = combo
+        
+        # Compute normalized difference
+        diff = np.float32(blurred)/np.float32(very_blurred)
+        diff = np.uint8(cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX))
+        
+        # Apply Otsu thresholding
+        _, mask = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Apply morphological closing
+        kernel_size = 3
+        kernel = np.ones((kernel_size, kernel_size), np.uint8)
+        closed_mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        
+        # Keep largest contiguous area
+        # Find all contiguous regions
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(closed_mask, connectivity=8)
+        
+        # Find the largest component by area (excluding background at index 0)
+        largest_mask = np.zeros_like(closed_mask)
+        
+        if num_labels > 1:
+            largest_label = 1
+            largest_area = stats[1, cv2.CC_STAT_AREA]
+            
+            for i in range(2, num_labels):
+                area = stats[i, cv2.CC_STAT_AREA]
+                if area > largest_area:
+                    largest_area = area
+                    largest_label = i
+            
+            # Create a new mask containing only the largest component
+            largest_mask[labels == largest_label] = 255
+        
+        # ---------- Prepare visualization of original and mask only ----------
+        # Convert mask to BGR for display
+    
         
         # Draw outline curves
-        outlined_image, left_curve, right_curve = self.draw_outline_curves(gray, img)
+        outlined_image, left_curve, right_curve = self.draw_outline_curves(largest_mask, img)
         
         # Create and draw center line
         center_line_image, center_line_top, center_line_bottom, center_line_angle = self.create_center_line(left_curve, right_curve, outlined_image)
         
-        return np.array(center_line_bottom, center_line_top), center_line_image
+        return np.array((center_line_bottom, center_line_top)), center_line_image
 
             
 
@@ -717,6 +759,9 @@ def test_simple_path():
             # two points [[x1, y1], [x2, y2]] - start and end of the line. In CV2 coordinate frame
             
             # use warp to convert the line points to the map coordinates:
+
+            if line_points[0] is None:
+                continue
 
             scale = CALIB_IMAGE_SIZE[0]/480.0
             line_points = np.array(line_points)*scale
